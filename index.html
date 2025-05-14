@@ -217,8 +217,9 @@
         // 配置部分
         const CONFIG = {
             DATA_URL: 'https://raw.githubusercontent.com/ws-ergua/flower-watering/main/data/records.json',
-            DEFAULT_RECORDS: [],
-            LOCAL_STORAGE_KEY: 'flowerWateringBackup'
+            GITHUB_API_URL: 'https://api.github.com/repos/ws-ergua/flower-watering/contents/data/records.json',
+            LOCAL_STORAGE_KEY: 'flowerWateringBackup',
+            TOKEN: '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' // 这里应该填入GitHub个人访问令牌
         };
 
         // DOM元素引用
@@ -241,7 +242,8 @@
         const state = {
             records: [],
             isLoading: false,
-            dataSource: 'github' // 'github' 或 'local'
+            dataSource: 'github',
+            lastSync: null
         };
 
         // 初始化应用
@@ -283,6 +285,7 @@
                     if (Array.isArray(data)) {
                         state.records = data;
                         state.dataSource = 'github';
+                        state.lastSync = new Date();
                         showSuccess('从GitHub加载数据成功');
                         // 备份到本地存储
                         saveToLocalStorage();
@@ -311,11 +314,11 @@
                     state.dataSource = 'local';
                     showError('使用本地备份数据 (GitHub加载失败)');
                 } else {
-                    state.records = CONFIG.DEFAULT_RECORDS;
+                    state.records = [];
                     showError('无可用数据，已初始化空记录');
                 }
             } catch (e) {
-                state.records = CONFIG.DEFAULT_RECORDS;
+                state.records = [];
                 showError('本地数据解析失败，已初始化空记录');
             }
         }
@@ -372,37 +375,55 @@
 
         // 处理手动同步
         async function handleManualSync() {
+            if (!CONFIG.TOKEN) {
+                showError('未配置GitHub访问令牌，无法同步');
+                return;
+            }
+
             setLoading(true);
             try {
-                // 这里应该是实际同步到GitHub的代码
-                // 由于需要GitHub API权限，这里只是模拟
-                
-                // 首先从GitHub重新加载最新数据
-                const response = await fetch(`${CONFIG.DATA_URL}?t=${Date.now()}`);
-                
-                if (response.ok) {
-                    const remoteData = await response.json();
-                    if (Array.isArray(remoteData)) {
-                        // 合并本地和远程数据（简单的合并策略）
-                        const mergedRecords = [...state.records, ...remoteData].filter(
-                            (record, index, self) => index === self.findIndex(r => r.id === record.id)
-                        );
-                        
-                        state.records = mergedRecords;
-                        state.dataSource = 'github';
-                        saveToLocalStorage();
-                        showSuccess('数据同步成功');
-                    } else {
-                        throw new Error('远程数据格式不正确');
+                // 1. 获取当前文件的SHA值
+                const getResponse = await fetch(CONFIG.GITHUB_API_URL, {
+                    headers: {
+                        'Authorization': `token ${CONFIG.TOKEN}`,
+                        'Accept': 'application/vnd.github.v3+json'
                     }
-                } else {
-                    throw new Error('无法获取远程数据');
+                });
+
+                if (!getResponse.ok) {
+                    throw new Error('无法获取文件信息: ' + getResponse.statusText);
                 }
+
+                const fileInfo = await getResponse.json();
+                const sha = fileInfo.sha;
+                const content = JSON.stringify(state.records, null, 2);
+                const encodedContent = btoa(unescape(encodeURIComponent(content)));
+                
+                // 2. 更新文件
+                const updateResponse = await fetch(CONFIG.GITHUB_API_URL, {
+                    method: 'PUT',
+                    headers: {
+                        'Authorization': `token ${CONFIG.TOKEN}`,
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/vnd.github.v3+json'
+                    },
+                    body: JSON.stringify({
+                        message: `更新浇水记录 ${new Date().toISOString()}`,
+                        content: encodedContent,
+                        sha: sha
+                    })
+                });
+
+                if (!updateResponse.ok) {
+                    throw new Error('更新失败: ' + updateResponse.statusText);
+                }
+
+                state.lastSync = new Date();
+                showSuccess('数据同步成功!');
             } catch (error) {
                 console.error('同步失败:', error);
                 showError('同步失败: ' + error.message);
             } finally {
-                renderRecords();
                 setLoading(false);
             }
         }
