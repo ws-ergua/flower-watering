@@ -186,7 +186,7 @@
                 <option value="马拉巴栗">马拉巴栗</option>
             </select>
             <button id="filterButton">筛选记录</button>
-            <button id="syncButton">手动同步</button>
+            <button id="refreshButton">刷新数据</button>
         </div>
     </div>
 
@@ -217,9 +217,11 @@
         // 配置部分
         const CONFIG = {
             DATA_URL: 'https://raw.githubusercontent.com/ws-ergua/flower-watering/main/data/records.json',
-            GITHUB_API_URL: 'https://api.github.com/repos/ws-ergua/flower-watering/contents/data/records.json',
-            LOCAL_STORAGE_KEY: 'flowerWateringBackup',
-            TOKEN: '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' // 这里应该填入GitHub个人访问令牌
+            DATA_API: 'https://api.github.com/repos/ws-ergua/flower-watering/contents/data/records.json',
+            GITHUB_TOKEN: '__GITHUB_TOKEN__', // 这里使用占位符
+            DEFAULT_RECORDS: [],
+            LOCAL_STORAGE_KEY: 'flowerWateringRecords',
+            COMMIT_MESSAGE: '更新浇水记录'
         };
 
         // DOM元素引用
@@ -230,7 +232,7 @@
             addButton: document.getElementById('addButton'),
             filterFlowerType: document.getElementById('filterFlowerType'),
             filterButton: document.getElementById('filterButton'),
-            syncButton: document.getElementById('syncButton'),
+            refreshButton: document.getElementById('refreshButton'),
             loader: document.getElementById('loader'),
             errorMessage: document.getElementById('errorMessage'),
             successMessage: document.getElementById('successMessage'),
@@ -242,8 +244,11 @@
         const state = {
             records: [],
             isLoading: false,
-            dataSource: 'github',
-            lastSync: null
+            useLocalStorage: false,
+            githubData: {
+                sha: null,
+                content: null
+            }
         };
 
         // 初始化应用
@@ -265,7 +270,7 @@
         function setupEventListeners() {
             elements.addButton.addEventListener('click', handleAddRecord);
             elements.filterButton.addEventListener('click', () => renderRecords(elements.filterFlowerType.value));
-            elements.syncButton.addEventListener('click', handleManualSync);
+            elements.refreshButton.addEventListener('click', loadRecords);
             
             // 添加键盘支持 - 在输入框中按Enter键提交
             elements.userName.addEventListener('keypress', (e) => {
@@ -277,27 +282,38 @@
         async function loadRecords() {
             setLoading(true);
             try {
-                // 尝试从GitHub加载数据
-                const response = await fetch(`${CONFIG.DATA_URL}?t=${Date.now()}`);
+                // 尝试从GitHub API加载，获取sha和内容
+                const apiResponse = await fetch(CONFIG.DATA_API, {
+                    headers: CONFIG.GITHUB_TOKEN ? {
+                        'Authorization': `token ${CONFIG.GITHUB_TOKEN}`,
+                        'Accept': 'application/vnd.github.v3+json'
+                    } : {}
+                });
                 
-                if (response.ok) {
-                    const data = await response.json();
-                    if (Array.isArray(data)) {
-                        state.records = data;
-                        state.dataSource = 'github';
-                        state.lastSync = new Date();
-                        showSuccess('从GitHub加载数据成功');
-                        // 备份到本地存储
-                        saveToLocalStorage();
-                    } else {
-                        throw new Error('数据格式不正确');
-                    }
+                if (apiResponse.ok) {
+                    const data = await apiResponse.json();
+                    const content = atob(data.content); // 解码base64内容
+                    state.records = JSON.parse(content);
+                    state.githubData.sha = data.sha;
+                    state.githubData.content = content;
+                    state.useLocalStorage = false;
+                    showSuccess('从GitHub加载数据成功');
                 } else {
-                    throw new Error(`HTTP错误! 状态: ${response.status}`);
+                    // GitHub API加载失败时尝试从原始数据URL加载
+                    const response = await fetch(`${CONFIG.DATA_URL}?t=${Date.now()}`);
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        state.records = Array.isArray(data) ? data : CONFIG.DEFAULT_RECORDS;
+                        state.useLocalStorage = false;
+                        showSuccess('从GitHub加载数据成功');
+                    } else {
+                        // GitHub加载失败时尝试从本地存储加载
+                        await loadFromLocalStorage();
+                    }
                 }
             } catch (error) {
                 console.error('从GitHub加载失败:', error);
-                // 从本地存储加载备份
                 await loadFromLocalStorage();
             } finally {
                 renderRecords();
@@ -311,19 +327,60 @@
                 const localData = localStorage.getItem(CONFIG.LOCAL_STORAGE_KEY);
                 if (localData) {
                     state.records = JSON.parse(localData);
-                    state.dataSource = 'local';
-                    showError('使用本地备份数据 (GitHub加载失败)');
+                    state.useLocalStorage = true;
+                    showError('使用本地存储数据 (GitHub加载失败)');
                 } else {
-                    state.records = [];
+                    state.records = CONFIG.DEFAULT_RECORDS;
                     showError('无可用数据，已初始化空记录');
                 }
             } catch (e) {
-                state.records = [];
+                state.records = CONFIG.DEFAULT_RECORDS;
                 showError('本地数据解析失败，已初始化空记录');
             }
         }
 
-        // 保存到本地存储
+        // 保存记录到GitHub
+        async function saveToGitHub() {
+            if (!CONFIG.GITHUB_TOKEN) {
+                showError('未配置GitHub Token，无法保存到GitHub');
+                return false;
+            }
+
+            try {
+                const content = JSON.stringify(state.records, null, 2);
+                const encodedContent = btoa(unescape(encodeURIComponent(content)));
+                
+                const response = await fetch(CONFIG.DATA_API, {
+                    method: 'PUT',
+                    headers: {
+                        'Authorization': `token ${CONFIG.GITHUB_TOKEN}`,
+                        'Accept': 'application/vnd.github.v3+json',
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        message: CONFIG.COMMIT_MESSAGE,
+                        content: encodedContent,
+                        sha: state.githubData.sha
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    state.githubData.sha = data.content.sha;
+                    state.githubData.content = content;
+                    return true;
+                } else {
+                    const error = await response.json();
+                    throw new Error(error.message || '保存到GitHub失败');
+                }
+            } catch (error) {
+                console.error('保存到GitHub失败:', error);
+                showError(`保存到GitHub失败: ${error.message}`);
+                return false;
+            }
+        }
+
+        // 保存记录到本地存储
         function saveToLocalStorage() {
             localStorage.setItem(CONFIG.LOCAL_STORAGE_KEY, JSON.stringify(state.records));
         }
@@ -362,70 +419,25 @@
             // 添加到本地状态
             state.records.unshift(newRecord);
             
-            // 保存到本地存储
-            saveToLocalStorage();
+            // 保存数据
+            let saveSuccess = true;
+            if (!state.useLocalStorage) {
+                saveSuccess = await saveToGitHub();
+            }
+            
+            if (state.useLocalStorage || !saveSuccess) {
+                saveToLocalStorage();
+                state.useLocalStorage = true;
+                showSuccess('记录已保存到本地存储');
+            } else {
+                showSuccess('记录已保存到GitHub');
+            }
             
             renderRecords();
-            showSuccess('记录已添加!');
             
             // 重置表单
             elements.flowerType.value = '';
             elements.userName.value = '';
-        }
-
-        // 处理手动同步
-        async function handleManualSync() {
-            if (!CONFIG.TOKEN) {
-                showError('未配置GitHub访问令牌，无法同步');
-                return;
-            }
-
-            setLoading(true);
-            try {
-                // 1. 获取当前文件的SHA值
-                const getResponse = await fetch(CONFIG.GITHUB_API_URL, {
-                    headers: {
-                        'Authorization': `token ${CONFIG.TOKEN}`,
-                        'Accept': 'application/vnd.github.v3+json'
-                    }
-                });
-
-                if (!getResponse.ok) {
-                    throw new Error('无法获取文件信息: ' + getResponse.statusText);
-                }
-
-                const fileInfo = await getResponse.json();
-                const sha = fileInfo.sha;
-                const content = JSON.stringify(state.records, null, 2);
-                const encodedContent = btoa(unescape(encodeURIComponent(content)));
-                
-                // 2. 更新文件
-                const updateResponse = await fetch(CONFIG.GITHUB_API_URL, {
-                    method: 'PUT',
-                    headers: {
-                        'Authorization': `token ${CONFIG.TOKEN}`,
-                        'Content-Type': 'application/json',
-                        'Accept': 'application/vnd.github.v3+json'
-                    },
-                    body: JSON.stringify({
-                        message: `更新浇水记录 ${new Date().toISOString()}`,
-                        content: encodedContent,
-                        sha: sha
-                    })
-                });
-
-                if (!updateResponse.ok) {
-                    throw new Error('更新失败: ' + updateResponse.statusText);
-                }
-
-                state.lastSync = new Date();
-                showSuccess('数据同步成功!');
-            } catch (error) {
-                console.error('同步失败:', error);
-                showError('同步失败: ' + error.message);
-            } finally {
-                setLoading(false);
-            }
         }
 
         // 渲染记录表格
@@ -460,13 +472,25 @@
         }
 
         // 删除记录
-        function deleteRecord(id) {
-            if (confirm('确定要删除这条记录吗？')) {
-                state.records = state.records.filter(record => record.id !== id);
-                saveToLocalStorage();
-                renderRecords(elements.filterFlowerType.value);
-                showSuccess('记录已删除');
+        async function deleteRecord(id) {
+            if (!confirm('确定要删除这条记录吗？')) return;
+            
+            state.records = state.records.filter(record => record.id !== id);
+            
+            let saveSuccess = true;
+            if (!state.useLocalStorage) {
+                saveSuccess = await saveToGitHub();
             }
+            
+            if (state.useLocalStorage || !saveSuccess) {
+                saveToLocalStorage();
+                state.useLocalStorage = true;
+                showSuccess('记录已从本地存储删除');
+            } else {
+                showSuccess('记录已从GitHub删除');
+            }
+            
+            renderRecords(elements.filterFlowerType.value);
         }
 
         // 设置加载状态
@@ -475,7 +499,7 @@
             elements.loader.style.display = loading ? 'block' : 'none';
             elements.addButton.disabled = loading;
             elements.filterButton.disabled = loading;
-            elements.syncButton.disabled = loading;
+            elements.refreshButton.disabled = loading;
         }
 
         // 显示错误消息
@@ -489,10 +513,10 @@
             elements.errorMessage.style.display = 'block';
             elements.successMessage.style.display = 'none';
             
-            // 5秒后自动隐藏
+            // 3秒后自动隐藏
             setTimeout(() => {
                 elements.errorMessage.style.display = 'none';
-            }, 5000);
+            }, 3000);
         }
 
         // 显示成功消息
@@ -506,10 +530,10 @@
             elements.successMessage.style.display = 'block';
             elements.errorMessage.style.display = 'none';
             
-            // 5秒后自动隐藏
+            // 3秒后自动隐藏
             setTimeout(() => {
                 elements.successMessage.style.display = 'none';
-            }, 5000);
+            }, 3000);
         }
 
         // 启动应用
