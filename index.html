@@ -216,7 +216,8 @@
         // 配置部分
         const CONFIG = {
             DATA_URL: 'https://raw.githubusercontent.com/ws-ergua/flower-watering/main/data/records.json',
-            DEFAULT_RECORDS: []
+            DEFAULT_RECORDS: [],
+            LOCAL_STORAGE_KEY: 'flowerWateringRecords'
         };
 
         // DOM元素引用
@@ -237,11 +238,12 @@
         // 应用状态
         const state = {
             records: [],
-            isLoading: false
+            isLoading: false,
+            useLocalStorage: false
         };
 
         // 初始化应用
-        function initApp() {
+        async function initApp() {
             // 设置当前年份
             elements.currentYear.textContent = new Date().getFullYear();
             
@@ -252,7 +254,7 @@
             setupEventListeners();
             
             // 加载数据
-            loadRecords();
+            await loadRecords();
         }
 
         // 设置事件监听器
@@ -270,23 +272,48 @@
         async function loadRecords() {
             setLoading(true);
             try {
+                // 先尝试从GitHub加载
                 const response = await fetch(`${CONFIG.DATA_URL}?t=${Date.now()}`);
                 
-                if (!response.ok) {
-                    throw new Error(`HTTP错误! 状态: ${response.status}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    state.records = Array.isArray(data) ? data : CONFIG.DEFAULT_RECORDS;
+                    state.useLocalStorage = false;
+                    showSuccess('从GitHub加载数据成功');
+                } else {
+                    // GitHub加载失败时尝试从本地存储加载
+                    await loadFromLocalStorage();
                 }
-                
-                state.records = await response.json();
-                renderRecords();
-                showSuccess('数据加载成功');
             } catch (error) {
-                console.error('加载记录失败:', error);
-                state.records = CONFIG.DEFAULT_RECORDS;
-                showError('数据加载失败，使用本地默认数据');
-                renderRecords();
+                console.error('从GitHub加载失败:', error);
+                await loadFromLocalStorage();
             } finally {
+                renderRecords();
                 setLoading(false);
             }
+        }
+
+        // 从本地存储加载
+        async function loadFromLocalStorage() {
+            try {
+                const localData = localStorage.getItem(CONFIG.LOCAL_STORAGE_KEY);
+                if (localData) {
+                    state.records = JSON.parse(localData);
+                    state.useLocalStorage = true;
+                    showError('使用本地存储数据 (GitHub加载失败)');
+                } else {
+                    state.records = CONFIG.DEFAULT_RECORDS;
+                    showError('无可用数据，已初始化空记录');
+                }
+            } catch (e) {
+                state.records = CONFIG.DEFAULT_RECORDS;
+                showError('本地数据解析失败，已初始化空记录');
+            }
+        }
+
+        // 保存记录到本地存储
+        function saveToLocalStorage() {
+            localStorage.setItem(CONFIG.LOCAL_STORAGE_KEY, JSON.stringify(state.records));
         }
 
         // 处理添加记录
@@ -321,19 +348,22 @@
             };
 
             // 添加到本地状态
-            state.records.unshift(newRecord); // 添加到数组开头
-            renderRecords();
+            state.records.unshift(newRecord);
             
-            // 显示成功消息
-            showSuccess('记录已添加!');
+            // 保存数据
+            if (state.useLocalStorage) {
+                saveToLocalStorage();
+                showSuccess('记录已保存到本地存储');
+            } else {
+                // 这里可以添加GitHub API提交代码
+                showSuccess('记录已添加 (需手动同步到GitHub)');
+            }
+            
+            renderRecords();
             
             // 重置表单
             elements.flowerType.value = '';
             elements.userName.value = '';
-            
-            // 这里应该添加实际提交到GitHub的代码
-            // 由于GitHub API需要认证，这里只是模拟
-            console.log('新记录:', newRecord);
         }
 
         // 渲染记录表格
@@ -369,14 +399,18 @@
 
         // 删除记录
         function deleteRecord(id) {
-            if (confirm('确定要删除这条记录吗？')) {
-                state.records = state.records.filter(record => record.id !== id);
-                renderRecords(elements.filterFlowerType.value);
-                showSuccess('记录已删除');
-                
-                // 这里应该添加实际从GitHub删除的代码
-                console.log('删除记录ID:', id);
+            if (!confirm('确定要删除这条记录吗？')) return;
+            
+            state.records = state.records.filter(record => record.id !== id);
+            
+            if (state.useLocalStorage) {
+                saveToLocalStorage();
+                showSuccess('记录已从本地存储删除');
+            } else {
+                showSuccess('记录已删除 (需手动同步到GitHub)');
             }
+            
+            renderRecords(elements.filterFlowerType.value);
         }
 
         // 设置加载状态
