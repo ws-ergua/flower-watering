@@ -32,7 +32,6 @@
             min-height: 100vh;
         }
 
-        /* 保持原有所有CSS样式不变 */
         .header {
             text-align: center;
             margin-bottom: 20px;
@@ -158,7 +157,6 @@
     </style>
 </head>
 <body>
-    <!-- 保持原有HTML结构不变 -->
     <div class="header">
         <h1>爱美特水务花卉浇水记录</h1>
     </div>
@@ -215,10 +213,13 @@
     </footer>
 
     <script>
-        // 修改后的数据存储方案（使用GitHub仓库存储）
-        const DATA_URL = 'https://raw.githubusercontent.com/你的用户名/仓库名/main/data/records.json';
-        
-        // 获取DOM元素
+        // 配置部分
+        const CONFIG = {
+            DATA_URL: 'https://raw.githubusercontent.com/ws-ergua/flower-watering/main/data/records.json',
+            DEFAULT_RECORDS: []
+        };
+
+        // DOM元素引用
         const elements = {
             waterDate: document.getElementById('waterDate'),
             flowerType: document.getElementById('flowerType'),
@@ -233,64 +234,84 @@
             currentYear: document.getElementById('currentYear')
         };
 
-        let records = [];
+        // 应用状态
+        const state = {
+            records: [],
+            isLoading: false
+        };
 
-        // 设置当前年份
-        elements.currentYear.textContent = new Date().getFullYear();
-
-        // 显示/隐藏加载状态
-        function setLoading(loading) {
-            elements.loader.style.display = loading ? 'block' : 'none';
-            elements.addButton.disabled = loading;
-            elements.filterButton.disabled = loading;
+        // 初始化应用
+        function initApp() {
+            // 设置当前年份
+            elements.currentYear.textContent = new Date().getFullYear();
+            
+            // 设置默认日期为今天
+            elements.waterDate.value = new Date().toISOString().split('T')[0];
+            
+            // 绑定事件监听器
+            setupEventListeners();
+            
+            // 加载数据
+            loadRecords();
         }
 
-        // 显示错误信息
-        function showError(message) {
-            elements.errorMessage.textContent = message || '';
-            elements.errorMessage.style.display = message ? 'block' : 'none';
-            if (message) elements.successMessage.style.display = 'none';
+        // 设置事件监听器
+        function setupEventListeners() {
+            elements.addButton.addEventListener('click', handleAddRecord);
+            elements.filterButton.addEventListener('click', () => renderRecords(elements.filterFlowerType.value));
+            
+            // 添加键盘支持 - 在输入框中按Enter键提交
+            elements.userName.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') handleAddRecord();
+            });
         }
 
-        // 显示成功信息
-        function showSuccess(message) {
-            elements.successMessage.textContent = message || '';
-            elements.successMessage.style.display = message ? 'block' : 'none';
-            if (message) elements.errorMessage.style.display = 'none';
-        }
-
-        // 获取当前日期（YYYY-MM-DD格式）
-        function getCurrentDate() {
-            return new Date().toISOString().split('T')[0];
-        }
-
-        // 从GitHub获取数据
-        async function fetchRecords() {
+        // 加载记录
+        async function loadRecords() {
             setLoading(true);
             try {
-                const response = await fetch(DATA_URL + '?t=' + Date.now());
-                if (!response.ok) throw new Error('数据加载失败');
-                records = await response.json();
+                const response = await fetch(`${CONFIG.DATA_URL}?t=${Date.now()}`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP错误! 状态: ${response.status}`);
+                }
+                
+                state.records = await response.json();
                 renderRecords();
+                showSuccess('数据加载成功');
             } catch (error) {
-                showError('数据加载失败: ' + error.message);
-                records = [];
+                console.error('加载记录失败:', error);
+                state.records = CONFIG.DEFAULT_RECORDS;
+                showError('数据加载失败，使用本地默认数据');
+                renderRecords();
             } finally {
                 setLoading(false);
             }
         }
 
-        // 添加记录（模拟提交）
-        async function addRecord() {
+        // 处理添加记录
+        async function handleAddRecord() {
+            // 验证输入
             const date = elements.waterDate.value;
             const type = elements.flowerType.value;
             const user = elements.userName.value.trim();
 
-            if (!date || !type || !user) {
-                showError('请填写所有必填字段');
+            if (!date) {
+                showError('请选择浇水日期');
                 return;
             }
 
+            if (!type) {
+                showError('请选择花卉种类');
+                return;
+            }
+
+            if (!user) {
+                showError('请输入记录人姓名');
+                return;
+            }
+
+            // 创建新记录对象
             const newRecord = {
                 id: Date.now().toString(),
                 date,
@@ -299,43 +320,109 @@
                 timestamp: new Date().toISOString()
             };
 
-            // 这里实际应该通过GitHub API提交到仓库
-            // 当前模拟提交成功
-            showSuccess('记录已提交！管理员将尽快处理');
+            // 添加到本地状态
+            state.records.unshift(newRecord); // 添加到数组开头
+            renderRecords();
+            
+            // 显示成功消息
+            showSuccess('记录已添加!');
+            
+            // 重置表单
             elements.flowerType.value = '';
             elements.userName.value = '';
+            
+            // 这里应该添加实际提交到GitHub的代码
+            // 由于GitHub API需要认证，这里只是模拟
+            console.log('新记录:', newRecord);
         }
 
         // 渲染记录表格
         function renderRecords(filter = 'all') {
-            const filtered = filter === 'all' 
-                ? records 
-                : records.filter(item => item.type === filter);
+            const filteredRecords = filter === 'all' 
+                ? state.records 
+                : state.records.filter(item => item.type === filter);
             
-            elements.recordsBody.innerHTML = filtered.length > 0
-                ? filtered.map(item => `
-                    <tr>
-                        <td>${item.date}</td>
-                        <td>${item.type}</td>
-                        <td>${item.user || '未填写'}</td>
-                        <td>
-                            <button class="delete-btn" data-id="${item.id}">删除</button>
-                        </td>
-                    </tr>
-                `).join('')
-                : '<tr><td colspan="4">没有找到记录</td></tr>';
+            if (filteredRecords.length === 0) {
+                elements.recordsBody.innerHTML = '<tr><td colspan="4">没有找到记录</td></tr>';
+                return;
+            }
+            
+            elements.recordsBody.innerHTML = filteredRecords.map(record => `
+                <tr>
+                    <td>${record.date}</td>
+                    <td>${record.type}</td>
+                    <td>${record.user || '未填写'}</td>
+                    <td>
+                        <button class="delete-btn" data-id="${record.id}">删除</button>
+                    </td>
+                </tr>
+            `).join('');
+            
+            // 添加删除按钮事件监听器
+            document.querySelectorAll('.delete-btn').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    const id = e.target.getAttribute('data-id');
+                    deleteRecord(id);
+                });
+            });
         }
 
-        // 初始化页面
-        function init() {
-            elements.waterDate.value = getCurrentDate();
-            elements.filterButton.addEventListener('click', () => renderRecords(elements.filterFlowerType.value));
-            elements.addButton.addEventListener('click', addRecord);
-            fetchRecords();
+        // 删除记录
+        function deleteRecord(id) {
+            if (confirm('确定要删除这条记录吗？')) {
+                state.records = state.records.filter(record => record.id !== id);
+                renderRecords(elements.filterFlowerType.value);
+                showSuccess('记录已删除');
+                
+                // 这里应该添加实际从GitHub删除的代码
+                console.log('删除记录ID:', id);
+            }
+        }
+
+        // 设置加载状态
+        function setLoading(loading) {
+            state.isLoading = loading;
+            elements.loader.style.display = loading ? 'block' : 'none';
+            elements.addButton.disabled = loading;
+            elements.filterButton.disabled = loading;
+        }
+
+        // 显示错误消息
+        function showError(message) {
+            if (!message) {
+                elements.errorMessage.style.display = 'none';
+                return;
+            }
+            
+            elements.errorMessage.textContent = message;
+            elements.errorMessage.style.display = 'block';
+            elements.successMessage.style.display = 'none';
+            
+            // 3秒后自动隐藏
+            setTimeout(() => {
+                elements.errorMessage.style.display = 'none';
+            }, 3000);
+        }
+
+        // 显示成功消息
+        function showSuccess(message) {
+            if (!message) {
+                elements.successMessage.style.display = 'none';
+                return;
+            }
+            
+            elements.successMessage.textContent = message;
+            elements.successMessage.style.display = 'block';
+            elements.errorMessage.style.display = 'none';
+            
+            // 3秒后自动隐藏
+            setTimeout(() => {
+                elements.successMessage.style.display = 'none';
+            }, 3000);
         }
 
         // 启动应用
-        document.addEventListener('DOMContentLoaded', init);
+        document.addEventListener('DOMContentLoaded', initApp);
     </script>
 </body>
 </html>
