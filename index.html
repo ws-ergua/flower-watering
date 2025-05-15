@@ -2,7 +2,8 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'unsafe-inline' 'self'; style-src 'unsafe-inline' 'self'">
     <title>爱美特水务花卉浇水记录</title>
     <style>
         :root {
@@ -28,15 +29,13 @@
             max-width: 800px;
             margin: 0 auto;
             padding: 15px;
-            -webkit-text-size-adjust: 100%;
-            touch-action: manipulation;
+            min-height: 100vh;
         }
 
         .header {
             text-align: center;
             margin-bottom: 20px;
         }
-        
         .header h1 {
             background: var(--secondary);
             color: white;
@@ -50,13 +49,12 @@
             background: white;
             padding: 15px;
             border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
             margin-bottom: 15px;
         }
 
-        .input-group {
+        .input-row {
             display: flex;
-            flex-wrap: wrap;
             gap: 10px;
             margin-bottom: 10px;
             align-items: center;
@@ -64,12 +62,10 @@
 
         input, select {
             flex: 1;
-            min-width: 120px;
             padding: 10px;
             border: 1px solid var(--border);
             border-radius: 6px;
             font-size: 1rem;
-            -webkit-appearance: none;
         }
 
         button {
@@ -80,70 +76,82 @@
             border-radius: 6px;
             cursor: pointer;
             font-size: 1rem;
+            transition: opacity 0.2s;
             white-space: nowrap;
-            min-width: 100px;
-            -webkit-tap-highlight-color: transparent;
         }
-        
-        button:hover, button:active {
+        button:hover {
             opacity: 0.9;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .delete-btn {
+            background: var(--error);
+            padding: 6px 12px;
         }
 
         table {
             width: 100%;
             border-collapse: collapse;
             margin-top: 15px;
-            font-size: 0.95rem;
+            background: white;
         }
-        
         th, td {
             padding: 12px;
             text-align: left;
             border-bottom: 1px solid var(--border);
         }
-        
         th {
             background: var(--secondary);
             color: white;
-            position: sticky;
-            top: 0;
         }
 
-        .message {
+        .loader {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid var(--secondary);
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+            margin: 10px auto;
+            display: none;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error-message {
+            color: var(--error);
             text-align: center;
             margin: 10px 0;
-            padding: 10px;
-            border-radius: 4px;
-            font-size: 0.9rem;
-        }
-        
-        .error {
-            background-color: #ffebee;
-            color: var(--error);
-        }
-        
-        .success {
-            background-color: #e8f5e9;
-            color: var(--primary);
+            display: none;
         }
 
-        .pending {
-            color: #FF9800;
-            font-size: 0.8em;
+        .success-message {
+            color: var(--secondary);
+            text-align: center;
+            margin: 10px 0;
+            display: none;
+        }
+
+        footer {
+            text-align: center;
+            margin-top: 20px;
+            color: #666;
+            font-size: 14px;
         }
 
         @media (max-width: 600px) {
-            .input-group {
+            body {
+                padding: 10px;
+            }
+            .input-row {
                 flex-direction: column;
             }
-            
             input, select, button {
                 width: 100%;
-            }
-            
-            th, td {
-                padding: 8px;
-                font-size: 0.9rem;
             }
         }
     </style>
@@ -154,23 +162,26 @@
     </div>
     
     <div class="section">
-        <div class="input-group">
+        <div class="input-row">
             <input type="date" id="waterDate">
             <select id="flowerType">
                 <option value="">选择花卉</option>
                 <option value="龙血树">龙血树</option>
                 <option value="马拉巴栗">马拉巴栗</option>
             </select>
+        </div>
+        <div class="input-row">
             <input type="text" id="userName" placeholder="记录人姓名" required>
             <button id="addButton">添加记录</button>
         </div>
-        <div id="message" class="message" style="display:none;"></div>
+        <div id="errorMessage" class="error-message"></div>
+        <div id="successMessage" class="success-message"></div>
     </div>
 
     <div class="section">
-        <div class="input-group">
-            <select id="filterType">
-                <option value="all">所有花卉</option>
+        <div class="input-row">
+            <select id="filterFlowerType">
+                <option value="all">显示所有花卉</option>
                 <option value="龙血树">龙血树</option>
                 <option value="马拉巴栗">马拉巴栗</option>
             </select>
@@ -179,197 +190,292 @@
     </div>
 
     <div class="section">
-        <div style="overflow-x:auto;">
-            <table id="recordsTable">
-                <thead>
-                    <tr>
-                        <th>浇水日期</th>
-                        <th>花卉种类</th>
-                        <th>记录人</th>
-                        <th>状态</th>
-                    </tr>
-                </thead>
-                <tbody id="recordsBody">
-                    <tr>
-                        <td colspan="4">正在加载数据...</td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
+        <div id="loader" class="loader"></div>
+        <table id="recordsTable">
+            <thead>
+                <tr>
+                    <th>浇水日期</th>
+                    <th>花卉种类</th>
+                    <th>记录人</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody id="recordsBody">
+                <tr>
+                    <td colspan="4">正在加载数据...</td>
+                </tr>
+            </tbody>
+        </table>
     </div>
 
+    <footer>
+        <p>© <span id="currentYear"></span> 张东海. All Rights Reserved.</p>
+    </footer>
+
     <script>
-        // 配置
+        // 配置部分 - 已根据您的用户名和仓库名定制
         const CONFIG = {
             DATA_URL: 'https://raw.githubusercontent.com/ws-ergua/flower-watering/main/data/records.json',
-            PENDING_URL: 'https://raw.githubusercontent.com/ws-ergua/flower-watering/main/data/pending.json',
-            LOCAL_KEY: 'flowerPendingRecords'
+            SUBMIT_URL: 'https://api.github.com/repos/ws-ergua/flower-watering/issues',
+            GITHUB_TOKEN: '', // 这里应该留空，实际使用时通过GitHub Actions注入
+            DEFAULT_RECORDS: [],
+            LOCAL_STORAGE_KEY: 'flowerWateringRecords',
+            SYNC_INTERVAL: 30000 // 30秒同步一次
         };
 
-        // 获取DOM元素
+        // DOM元素引用
         const elements = {
             waterDate: document.getElementById('waterDate'),
             flowerType: document.getElementById('flowerType'),
             userName: document.getElementById('userName'),
             addButton: document.getElementById('addButton'),
-            filterType: document.getElementById('filterType'),
+            filterFlowerType: document.getElementById('filterFlowerType'),
             filterButton: document.getElementById('filterButton'),
+            loader: document.getElementById('loader'),
+            errorMessage: document.getElementById('errorMessage'),
+            successMessage: document.getElementById('successMessage'),
             recordsBody: document.getElementById('recordsBody'),
-            message: document.getElementById('message')
+            currentYear: document.getElementById('currentYear')
         };
 
-        // 状态
-        let records = [];
-        let pendingRecords = [];
+        // 应用状态
+        const state = {
+            records: [],
+            isLoading: false,
+            useLocalStorage: false,
+            syncTimer: null
+        };
 
-        // 初始化
-        async function init() {
+        // 初始化应用
+        async function initApp() {
+            // 设置当前年份
+            elements.currentYear.textContent = new Date().getFullYear();
+            
             // 设置默认日期为今天
-            const today = new Date().toISOString().split('T')[0];
-            elements.waterDate.value = today;
+            elements.waterDate.value = new Date().toISOString().split('T')[0];
+            
+            // 绑定事件监听器
+            setupEventListeners();
             
             // 加载数据
-            await loadData();
+            await loadRecords();
             
-            // 添加事件监听 - 同时支持点击和触摸
+            // 设置定时同步
+            state.syncTimer = setInterval(() => loadRecords(), CONFIG.SYNC_INTERVAL);
+        }
+
+        // 设置事件监听器
+        function setupEventListeners() {
             elements.addButton.addEventListener('click', handleAddRecord);
-            elements.addButton.addEventListener('touchend', handleAddRecord);
-            elements.filterButton.addEventListener('click', filterRecords);
-            elements.filterButton.addEventListener('touchend', filterRecords);
+            elements.filterButton.addEventListener('click', () => renderRecords(elements.filterFlowerType.value));
             
-            // 回车提交
-            elements.userName.addEventListener('keypress', e => {
+            // 添加键盘支持 - 在输入框中按Enter键提交
+            elements.userName.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') handleAddRecord();
             });
         }
 
-        // 加载数据
-        async function loadData() {
-            showLoading();
+        // 加载记录
+        async function loadRecords() {
+            setLoading(true);
             try {
-                // 加载主记录
-                const res = await fetch(`${CONFIG.DATA_URL}?t=${Date.now()}`);
-                if (res.ok) records = await res.json();
+                // 从GitHub加载
+                const response = await fetch(`${CONFIG.DATA_URL}?t=${Date.now()}`);
                 
-                // 加载待审核记录
-                const pendingRes = await fetch(`${CONFIG.PENDING_URL}?t=${Date.now()}`);
-                if (pendingRes.ok) pendingRecords = await pendingRes.json();
-                
-                // 合并本地待提交记录
-                const localPending = JSON.parse(localStorage.getItem(CONFIG.LOCAL_KEY)) || [];
-                pendingRecords = [...pendingRecords, ...localPending];
-                
+                if (response.ok) {
+                    const data = await response.json();
+                    state.records = Array.isArray(data) ? data : CONFIG.DEFAULT_RECORDS;
+                    state.useLocalStorage = false;
+                    showSuccess('数据已同步');
+                } else {
+                    throw new Error('GitHub数据加载失败');
+                }
+            } catch (error) {
+                console.error('数据加载失败:', error);
+                // 失败时不显示错误，避免干扰用户体验
+            } finally {
                 renderRecords();
-                showMessage('数据加载成功', 'success');
-            } catch (err) {
-                console.error('加载失败:', err);
-                showMessage('数据加载失败，请稍后重试', 'error');
-                // 尝试从本地存储加载
-                const localData = JSON.parse(localStorage.getItem(CONFIG.LOCAL_KEY)) || [];
-                pendingRecords = localData;
-                renderRecords();
+                setLoading(false);
             }
         }
 
         // 处理添加记录
-        function handleAddRecord(e) {
-            if (e) {
-                e.preventDefault(); // 防止移动端双击
-                e.stopPropagation(); // 阻止事件冒泡
-            }
-            
+        async function handleAddRecord() {
+            // 验证输入
             const date = elements.waterDate.value;
             const type = elements.flowerType.value;
             const user = elements.userName.value.trim();
-            
-            if (!date || !type || !user) {
-                showMessage('请填写完整信息', 'error');
+
+            if (!date) {
+                showError('请选择浇水日期');
                 return;
             }
-            
+
+            if (!type) {
+                showError('请选择花卉种类');
+                return;
+            }
+
+            if (!user) {
+                showError('请输入记录人姓名');
+                return;
+            }
+
+            // 创建新记录对象
             const newRecord = {
-                id: Date.now(),
+                id: Date.now().toString(),
                 date,
                 type,
                 user,
                 timestamp: new Date().toISOString()
             };
+
+            // 添加到本地状态
+            state.records.unshift(newRecord);
             
-            // 添加到本地待提交
-            const pending = JSON.parse(localStorage.getItem(CONFIG.LOCAL_KEY)) || [];
-            pending.push(newRecord);
-            localStorage.setItem(CONFIG.LOCAL_KEY, JSON.stringify(pending));
+            // 提交到GitHub Issue
+            await submitRecordToGitHub(newRecord);
             
-            // 更新显示
-            pendingRecords.push(newRecord);
             renderRecords();
             
-            // 清空表单
-            elements.userName.value = '';
+            // 重置表单
             elements.flowerType.value = '';
-            
-            showMessage('记录已保存，等待管理员审核', 'success');
-            
-            // 移动端收起键盘
-            elements.userName.blur();
+            elements.userName.value = '';
         }
 
-        // 渲染记录
-        function renderRecords() {
-            const filter = elements.filterType.value;
-            const filtered = filter === 'all' 
-                ? [...records, ...pendingRecords]
-                : [...records, ...pendingRecords].filter(r => r.type === filter);
+        // 提交记录到GitHub Issue
+        async function submitRecordToGitHub(record) {
+            setLoading(true);
+            try {
+                const issueTitle = `新浇水记录: ${record.type} - ${record.user}`;
+                const issueBody = `**花卉种类**: ${record.type}\n\n` +
+                                 `**浇水日期**: ${record.date}\n\n` +
+                                 `**记录人**: ${record.user}\n\n` +
+                                 `**时间戳**: ${record.timestamp}`;
+                
+                const response = await fetch(CONFIG.SUBMIT_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `token ${CONFIG.GITHUB_TOKEN}`,
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/vnd.github.v3+json'
+                    },
+                    body: JSON.stringify({
+                        title: issueTitle,
+                        body: issueBody,
+                        labels: ['watering-record']
+                    })
+                });
+
+                if (response.ok) {
+                    showSuccess('记录已提交，等待管理员审核');
+                } else {
+                    throw new Error('提交失败');
+                }
+            } catch (error) {
+                console.error('提交到GitHub失败:', error);
+                showError('提交失败，请稍后重试');
+                // 临时保存到本地存储
+                saveToLocalStorage([...state.records]);
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        // 保存记录到本地存储
+        function saveToLocalStorage(records) {
+            localStorage.setItem(CONFIG.LOCAL_STORAGE_KEY, JSON.stringify(records));
+        }
+
+        // 渲染记录表格
+        function renderRecords(filter = 'all') {
+            const filteredRecords = filter === 'all' 
+                ? state.records 
+                : state.records.filter(item => item.type === filter);
             
-            if (filtered.length === 0) {
-                elements.recordsBody.innerHTML = '<tr><td colspan="4">暂无记录</td></tr>';
+            if (filteredRecords.length === 0) {
+                elements.recordsBody.innerHTML = '<tr><td colspan="4">没有找到记录</td></tr>';
                 return;
             }
             
-            // 按日期排序
-            filtered.sort((a, b) => new Date(b.date) - new Date(a.date));
-            
-            elements.recordsBody.innerHTML = filtered.map(record => `
+            elements.recordsBody.innerHTML = filteredRecords.map(record => `
                 <tr>
                     <td>${record.date}</td>
                     <td>${record.type}</td>
-                    <td>${record.user}</td>
+                    <td>${record.user || '未填写'}</td>
                     <td>
-                        ${records.some(r => r.id === record.id) ? '' : 
-                         '<span class="pending">待审核</span>'}
+                        <button class="delete-btn" data-id="${record.id}">删除</button>
                     </td>
                 </tr>
             `).join('');
-        }
-
-        // 筛选记录
-        function filterRecords(e) {
-            if (e) {
-                e.preventDefault();
-                e.stopPropagation();
-            }
-            renderRecords();
-            showMessage('筛选已应用', 'success');
-        }
-
-        // 显示加载状态
-        function showLoading() {
-            elements.recordsBody.innerHTML = '<tr><td colspan="4">加载中...</td></tr>';
-        }
-
-        // 显示消息
-        function showMessage(text, type) {
-            elements.message.textContent = text;
-            elements.message.className = `message ${type}`;
-            elements.message.style.display = 'block';
             
+            // 添加删除按钮事件监听器
+            document.querySelectorAll('.delete-btn').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    const id = e.target.getAttribute('data-id');
+                    deleteRecord(id);
+                });
+            });
+        }
+
+        // 删除记录
+        function deleteRecord(id) {
+            if (!confirm('确定要删除这条记录吗？')) return;
+            
+            state.records = state.records.filter(record => record.id !== id);
+            
+            if (state.useLocalStorage) {
+                saveToLocalStorage(state.records);
+                showSuccess('记录已删除');
+            }
+            
+            renderRecords(elements.filterFlowerType.value);
+        }
+
+        // 设置加载状态
+        function setLoading(loading) {
+            state.isLoading = loading;
+            elements.loader.style.display = loading ? 'block' : 'none';
+            elements.addButton.disabled = loading;
+            elements.filterButton.disabled = loading;
+        }
+
+        // 显示错误消息
+        function showError(message) {
+            if (!message) {
+                elements.errorMessage.style.display = 'none';
+                return;
+            }
+            
+            elements.errorMessage.textContent = message;
+            elements.errorMessage.style.display = 'block';
+            elements.successMessage.style.display = 'none';
+            
+            // 3秒后自动隐藏
             setTimeout(() => {
-                elements.message.style.display = 'none';
+                elements.errorMessage.style.display = 'none';
+            }, 3000);
+        }
+
+        // 显示成功消息
+        function showSuccess(message) {
+            if (!message) {
+                elements.successMessage.style.display = 'none';
+                return;
+            }
+            
+            elements.successMessage.textContent = message;
+            elements.successMessage.style.display = 'block';
+            elements.errorMessage.style.display = 'none';
+            
+            // 3秒后自动隐藏
+            setTimeout(() => {
+                elements.successMessage.style.display = 'none';
             }, 3000);
         }
 
         // 启动应用
-        document.addEventListener('DOMContentLoaded', init);
+        document.addEventListener('DOMContentLoaded', initApp);
     </script>
 </body>
 </html>
