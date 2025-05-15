@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>爱美特水务花卉浇水记录</title>
     <style>
         :root {
@@ -27,7 +27,9 @@
             background: var(--bg);
             max-width: 800px;
             margin: 0 auto;
-            padding: 20px;
+            padding: 15px;
+            -webkit-text-size-adjust: 100%;
+            touch-action: manipulation;
         }
 
         .header {
@@ -41,6 +43,7 @@
             padding: 12px;
             border-radius: 8px;
             font-size: 1.3rem;
+            margin: 0;
         }
 
         .section {
@@ -53,16 +56,20 @@
 
         .input-group {
             display: flex;
+            flex-wrap: wrap;
             gap: 10px;
             margin-bottom: 10px;
+            align-items: center;
         }
 
         input, select {
             flex: 1;
+            min-width: 120px;
             padding: 10px;
             border: 1px solid var(--border);
             border-radius: 6px;
             font-size: 1rem;
+            -webkit-appearance: none;
         }
 
         button {
@@ -73,9 +80,12 @@
             border-radius: 6px;
             cursor: pointer;
             font-size: 1rem;
+            white-space: nowrap;
+            min-width: 100px;
+            -webkit-tap-highlight-color: transparent;
         }
         
-        button:hover {
+        button:hover, button:active {
             opacity: 0.9;
         }
 
@@ -83,6 +93,7 @@
             width: 100%;
             border-collapse: collapse;
             margin-top: 15px;
+            font-size: 0.95rem;
         }
         
         th, td {
@@ -94,6 +105,8 @@
         th {
             background: var(--secondary);
             color: white;
+            position: sticky;
+            top: 0;
         }
 
         .message {
@@ -101,6 +114,7 @@
             margin: 10px 0;
             padding: 10px;
             border-radius: 4px;
+            font-size: 0.9rem;
         }
         
         .error {
@@ -117,6 +131,21 @@
             color: #FF9800;
             font-size: 0.8em;
         }
+
+        @media (max-width: 600px) {
+            .input-group {
+                flex-direction: column;
+            }
+            
+            input, select, button {
+                width: 100%;
+            }
+            
+            th, td {
+                padding: 8px;
+                font-size: 0.9rem;
+            }
+        }
     </style>
 </head>
 <body>
@@ -132,8 +161,6 @@
                 <option value="龙血树">龙血树</option>
                 <option value="马拉巴栗">马拉巴栗</option>
             </select>
-        </div>
-        <div class="input-group">
             <input type="text" id="userName" placeholder="记录人姓名" required>
             <button id="addButton">添加记录</button>
         </div>
@@ -152,21 +179,23 @@
     </div>
 
     <div class="section">
-        <table id="recordsTable">
-            <thead>
-                <tr>
-                    <th>浇水日期</th>
-                    <th>花卉种类</th>
-                    <th>记录人</th>
-                    <th>状态</th>
-                </tr>
-            </thead>
-            <tbody id="recordsBody">
-                <tr>
-                    <td colspan="4">正在加载数据...</td>
-                </tr>
-            </tbody>
-        </table>
+        <div style="overflow-x:auto;">
+            <table id="recordsTable">
+                <thead>
+                    <tr>
+                        <th>浇水日期</th>
+                        <th>花卉种类</th>
+                        <th>记录人</th>
+                        <th>状态</th>
+                    </tr>
+                </thead>
+                <tbody id="recordsBody">
+                    <tr>
+                        <td colspan="4">正在加载数据...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
     </div>
 
     <script>
@@ -202,13 +231,15 @@
             // 加载数据
             await loadData();
             
-            // 添加事件监听
-            elements.addButton.addEventListener('click', addRecord);
+            // 添加事件监听 - 同时支持点击和触摸
+            elements.addButton.addEventListener('click', handleAddRecord);
+            elements.addButton.addEventListener('touchend', handleAddRecord);
             elements.filterButton.addEventListener('click', filterRecords);
+            elements.filterButton.addEventListener('touchend', filterRecords);
             
             // 回车提交
             elements.userName.addEventListener('keypress', e => {
-                if (e.key === 'Enter') addRecord();
+                if (e.key === 'Enter') handleAddRecord();
             });
         }
 
@@ -218,11 +249,11 @@
             try {
                 // 加载主记录
                 const res = await fetch(`${CONFIG.DATA_URL}?t=${Date.now()}`);
-                records = await res.json();
+                if (res.ok) records = await res.json();
                 
                 // 加载待审核记录
                 const pendingRes = await fetch(`${CONFIG.PENDING_URL}?t=${Date.now()}`);
-                pendingRecords = await pendingRes.json();
+                if (pendingRes.ok) pendingRecords = await pendingRes.json();
                 
                 // 合并本地待提交记录
                 const localPending = JSON.parse(localStorage.getItem(CONFIG.LOCAL_KEY)) || [];
@@ -233,11 +264,20 @@
             } catch (err) {
                 console.error('加载失败:', err);
                 showMessage('数据加载失败，请稍后重试', 'error');
+                // 尝试从本地存储加载
+                const localData = JSON.parse(localStorage.getItem(CONFIG.LOCAL_KEY)) || [];
+                pendingRecords = localData;
+                renderRecords();
             }
         }
 
-        // 添加记录
-        async function addRecord() {
+        // 处理添加记录
+        function handleAddRecord(e) {
+            if (e) {
+                e.preventDefault(); // 防止移动端双击
+                e.stopPropagation(); // 阻止事件冒泡
+            }
+            
             const date = elements.waterDate.value;
             const type = elements.flowerType.value;
             const user = elements.userName.value.trim();
@@ -269,6 +309,9 @@
             elements.flowerType.value = '';
             
             showMessage('记录已保存，等待管理员审核', 'success');
+            
+            // 移动端收起键盘
+            elements.userName.blur();
         }
 
         // 渲染记录
@@ -300,7 +343,11 @@
         }
 
         // 筛选记录
-        function filterRecords() {
+        function filterRecords(e) {
+            if (e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
             renderRecords();
             showMessage('筛选已应用', 'success');
         }
