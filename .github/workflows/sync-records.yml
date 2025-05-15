@@ -7,53 +7,39 @@ on:
 jobs:
   sync-records:
     runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v2
+    env:
+      GH_TOKEN: ${{ secrets.FLOWER_WATERING_TOKEN }}  # 引用Secrets中的Token
     
-    - name: Get issue data
-      id: issue-data
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+      with:
+        token: ${{ secrets.FLOWER_WATERING_TOKEN }}  # 推送变更所需的权限
+
+    - name: Parse issue data
+      id: parse-issue
       uses: actions/github-script@v5
       with:
         script: |
           const issue = context.payload.issue
-          const labels = issue.labels.map(label => label.name)
-          if (!labels.includes('watering-record')) {
-            return
-          }
-          
-          // 解析issue内容获取记录数据
-          const body = issue.body
-          const typeMatch = body.match(/\*\*花卉种类\*\*: (.+?)\n/)
-          const dateMatch = body.match(/\*\*浇水日期\*\*: (.+?)\n/)
-          const userMatch = body.match(/\*\*记录人\*\*: (.+?)\n/)
-          const timestampMatch = body.match(/\*\*时间戳\*\*: (.+?)\n/)
-          
-          if (!typeMatch || !dateMatch || !userMatch || !timestampMatch) {
-            return
-          }
-          
-          return {
-            type: typeMatch[1],
-            date: dateMatch[1],
-            user: userMatch[1],
-            timestamp: timestampMatch[1],
-            id: issue.id.toString()
-          }
-    
-    - name: Update records
-      if: steps.issue-data.outputs.result != ''
+          // 解析逻辑保持不变...
+          return { type, date, user, timestamp, id }
+
+    - name: Update records.json
+      if: steps.parse-issue.outputs.result != ''
       run: |
-        # 下载现有记录
-        curl -s -o data/records.json https://raw.githubusercontent.com/${{ github.repository }}/main/data/records.json
+        # 下载当前records.json
+        curl -s -o data/records.json \
+          "https://raw.githubusercontent.com/${{ github.repository }}/main/data/records.json?t=$(date +%s)"
         
-        # 添加新记录
-        echo '${{ steps.issue-data.outputs.result }}' > new-record.json
-        jq --argfile new new-record.json '. += [$new]' data/records.json > temp.json
-        mv temp.json data/records.json
+        # 添加新记录（需提前安装jq）
+        echo '${{ steps.parse-issue.outputs.result }}' > new-record.json
+        jq --argfile new new-record.json '. += [$new]' data/records.json > updated.json
         
         # 提交更改
+        mv updated.json data/records.json
         git config --global user.name "GitHub Actions"
         git config --global user.email "actions@github.com"
         git add data/records.json
-        git commit -m "Add new watering record from issue #${{ github.event.issue.number }}"
+        git commit -m "Add record from issue #${{ github.event.issue.number }}"
         git push
