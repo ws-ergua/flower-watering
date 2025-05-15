@@ -2,8 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'unsafe-inline' 'self'; style-src 'unsafe-inline' 'self'">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>爱美特水务花卉浇水记录</title>
     <style>
         :root {
@@ -28,36 +27,34 @@
             background: var(--bg);
             max-width: 800px;
             margin: 0 auto;
-            padding: 15px;
-            min-height: 100vh;
+            padding: 20px;
         }
 
         .header {
             text-align: center;
             margin-bottom: 20px;
         }
+        
         .header h1 {
             background: var(--secondary);
             color: white;
             padding: 12px;
             border-radius: 8px;
             font-size: 1.3rem;
-            margin: 0;
         }
 
         .section {
             background: white;
             padding: 15px;
             border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             margin-bottom: 15px;
         }
 
-        .input-row {
+        .input-group {
             display: flex;
             gap: 10px;
             margin-bottom: 10px;
-            align-items: center;
         }
 
         input, select {
@@ -76,83 +73,49 @@
             border-radius: 6px;
             cursor: pointer;
             font-size: 1rem;
-            transition: opacity 0.2s;
-            white-space: nowrap;
         }
+        
         button:hover {
             opacity: 0.9;
-        }
-        button:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-        }
-        .delete-btn {
-            background: var(--error);
-            padding: 6px 12px;
         }
 
         table {
             width: 100%;
             border-collapse: collapse;
             margin-top: 15px;
-            background: white;
         }
+        
         th, td {
             padding: 12px;
             text-align: left;
             border-bottom: 1px solid var(--border);
         }
+        
         th {
             background: var(--secondary);
             color: white;
         }
 
-        .loader {
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid var(--secondary);
-            border-radius: 50%;
-            width: 20px;
-            height: 20px;
-            animation: spin 1s linear infinite;
-            margin: 10px auto;
-            display: none;
+        .message {
+            text-align: center;
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 4px;
         }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .error-message {
+        
+        .error {
+            background-color: #ffebee;
             color: var(--error);
-            text-align: center;
-            margin: 10px 0;
-            display: none;
+        }
+        
+        .success {
+            background-color: #e8f5e9;
+            color: var(--primary);
         }
 
-        .success-message {
-            color: var(--secondary);
-            text-align: center;
-            margin: 10px 0;
-            display: none;
-        }
-
-        footer {
-            text-align: center;
-            margin-top: 20px;
-            color: #666;
-            font-size: 14px;
-        }
-
-        @media (max-width: 600px) {
-            body {
-                padding: 10px;
-            }
-            .input-row {
-                flex-direction: column;
-            }
-            input, select, button {
-                width: 100%;
-            }
+        .pending {
+            color: #FF9800;
+            font-size: 0.8em;
         }
     </style>
 </head>
@@ -162,7 +125,7 @@
     </div>
     
     <div class="section">
-        <div class="input-row">
+        <div class="input-group">
             <input type="date" id="waterDate">
             <select id="flowerType">
                 <option value="">选择花卉</option>
@@ -170,35 +133,32 @@
                 <option value="马拉巴栗">马拉巴栗</option>
             </select>
         </div>
-        <div class="input-row">
+        <div class="input-group">
             <input type="text" id="userName" placeholder="记录人姓名" required>
             <button id="addButton">添加记录</button>
         </div>
-        <div id="errorMessage" class="error-message"></div>
-        <div id="successMessage" class="success-message"></div>
+        <div id="message" class="message" style="display:none;"></div>
     </div>
 
     <div class="section">
-        <div class="input-row">
-            <select id="filterFlowerType">
-                <option value="all">显示所有花卉</option>
+        <div class="input-group">
+            <select id="filterType">
+                <option value="all">所有花卉</option>
                 <option value="龙血树">龙血树</option>
                 <option value="马拉巴栗">马拉巴栗</option>
             </select>
             <button id="filterButton">筛选记录</button>
-            <button id="refreshButton">刷新数据</button>
         </div>
     </div>
 
     <div class="section">
-        <div id="loader" class="loader"></div>
         <table id="recordsTable">
             <thead>
                 <tr>
                     <th>浇水日期</th>
                     <th>花卉种类</th>
                     <th>记录人</th>
-                    <th>操作</th>
+                    <th>状态</th>
                 </tr>
             </thead>
             <tbody id="recordsBody">
@@ -209,335 +169,160 @@
         </table>
     </div>
 
-    <footer>
-        <p>© <span id="currentYear"></span> 张东海. All Rights Reserved.</p>
-    </footer>
-
     <script>
-        // 配置部分
+        // 配置
         const CONFIG = {
             DATA_URL: 'https://raw.githubusercontent.com/ws-ergua/flower-watering/main/data/records.json',
-            DATA_API: 'https://api.github.com/repos/ws-ergua/flower-watering/contents/data/records.json',
-            GITHUB_TOKEN: '__GITHUB_TOKEN__', // 这里使用占位符
-            DEFAULT_RECORDS: [],
-            LOCAL_STORAGE_KEY: 'flowerWateringRecords',
-            COMMIT_MESSAGE: '更新浇水记录'
+            PENDING_URL: 'https://raw.githubusercontent.com/ws-ergua/flower-watering/main/data/pending.json',
+            LOCAL_KEY: 'flowerPendingRecords'
         };
 
-        // DOM元素引用
+        // 获取DOM元素
         const elements = {
             waterDate: document.getElementById('waterDate'),
             flowerType: document.getElementById('flowerType'),
             userName: document.getElementById('userName'),
             addButton: document.getElementById('addButton'),
-            filterFlowerType: document.getElementById('filterFlowerType'),
+            filterType: document.getElementById('filterType'),
             filterButton: document.getElementById('filterButton'),
-            refreshButton: document.getElementById('refreshButton'),
-            loader: document.getElementById('loader'),
-            errorMessage: document.getElementById('errorMessage'),
-            successMessage: document.getElementById('successMessage'),
             recordsBody: document.getElementById('recordsBody'),
-            currentYear: document.getElementById('currentYear')
+            message: document.getElementById('message')
         };
 
-        // 应用状态
-        const state = {
-            records: [],
-            isLoading: false,
-            useLocalStorage: false,
-            githubData: {
-                sha: null,
-                content: null
-            }
-        };
+        // 状态
+        let records = [];
+        let pendingRecords = [];
 
-        // 初始化应用
-        async function initApp() {
-            // 设置当前年份
-            elements.currentYear.textContent = new Date().getFullYear();
-            
+        // 初始化
+        async function init() {
             // 设置默认日期为今天
-            elements.waterDate.value = new Date().toISOString().split('T')[0];
-            
-            // 绑定事件监听器
-            setupEventListeners();
+            const today = new Date().toISOString().split('T')[0];
+            elements.waterDate.value = today;
             
             // 加载数据
-            await loadRecords();
-        }
-
-        // 设置事件监听器
-        function setupEventListeners() {
-            elements.addButton.addEventListener('click', handleAddRecord);
-            elements.filterButton.addEventListener('click', () => renderRecords(elements.filterFlowerType.value));
-            elements.refreshButton.addEventListener('click', loadRecords);
+            await loadData();
             
-            // 添加键盘支持 - 在输入框中按Enter键提交
-            elements.userName.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') handleAddRecord();
+            // 添加事件监听
+            elements.addButton.addEventListener('click', addRecord);
+            elements.filterButton.addEventListener('click', filterRecords);
+            
+            // 回车提交
+            elements.userName.addEventListener('keypress', e => {
+                if (e.key === 'Enter') addRecord();
             });
         }
 
-        // 加载记录
-        async function loadRecords() {
-            setLoading(true);
+        // 加载数据
+        async function loadData() {
+            showLoading();
             try {
-                // 尝试从GitHub API加载，获取sha和内容
-                const apiResponse = await fetch(CONFIG.DATA_API, {
-                    headers: CONFIG.GITHUB_TOKEN ? {
-                        'Authorization': `token ${CONFIG.GITHUB_TOKEN}`,
-                        'Accept': 'application/vnd.github.v3+json'
-                    } : {}
-                });
+                // 加载主记录
+                const res = await fetch(`${CONFIG.DATA_URL}?t=${Date.now()}`);
+                records = await res.json();
                 
-                if (apiResponse.ok) {
-                    const data = await apiResponse.json();
-                    const content = atob(data.content); // 解码base64内容
-                    state.records = JSON.parse(content);
-                    state.githubData.sha = data.sha;
-                    state.githubData.content = content;
-                    state.useLocalStorage = false;
-                    showSuccess('从GitHub加载数据成功');
-                } else {
-                    // GitHub API加载失败时尝试从原始数据URL加载
-                    const response = await fetch(`${CONFIG.DATA_URL}?t=${Date.now()}`);
-                    
-                    if (response.ok) {
-                        const data = await response.json();
-                        state.records = Array.isArray(data) ? data : CONFIG.DEFAULT_RECORDS;
-                        state.useLocalStorage = false;
-                        showSuccess('从GitHub加载数据成功');
-                    } else {
-                        // GitHub加载失败时尝试从本地存储加载
-                        await loadFromLocalStorage();
-                    }
-                }
-            } catch (error) {
-                console.error('从GitHub加载失败:', error);
-                await loadFromLocalStorage();
-            } finally {
+                // 加载待审核记录
+                const pendingRes = await fetch(`${CONFIG.PENDING_URL}?t=${Date.now()}`);
+                pendingRecords = await pendingRes.json();
+                
+                // 合并本地待提交记录
+                const localPending = JSON.parse(localStorage.getItem(CONFIG.LOCAL_KEY)) || [];
+                pendingRecords = [...pendingRecords, ...localPending];
+                
                 renderRecords();
-                setLoading(false);
+                showMessage('数据加载成功', 'success');
+            } catch (err) {
+                console.error('加载失败:', err);
+                showMessage('数据加载失败，请稍后重试', 'error');
             }
         }
 
-        // 从本地存储加载
-        async function loadFromLocalStorage() {
-            try {
-                const localData = localStorage.getItem(CONFIG.LOCAL_STORAGE_KEY);
-                if (localData) {
-                    state.records = JSON.parse(localData);
-                    state.useLocalStorage = true;
-                    showError('使用本地存储数据 (GitHub加载失败)');
-                } else {
-                    state.records = CONFIG.DEFAULT_RECORDS;
-                    showError('无可用数据，已初始化空记录');
-                }
-            } catch (e) {
-                state.records = CONFIG.DEFAULT_RECORDS;
-                showError('本地数据解析失败，已初始化空记录');
-            }
-        }
-
-        // 保存记录到GitHub
-        async function saveToGitHub() {
-            if (!CONFIG.GITHUB_TOKEN) {
-                showError('未配置GitHub Token，无法保存到GitHub');
-                return false;
-            }
-
-            try {
-                const content = JSON.stringify(state.records, null, 2);
-                const encodedContent = btoa(unescape(encodeURIComponent(content)));
-                
-                const response = await fetch(CONFIG.DATA_API, {
-                    method: 'PUT',
-                    headers: {
-                        'Authorization': `token ${CONFIG.GITHUB_TOKEN}`,
-                        'Accept': 'application/vnd.github.v3+json',
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        message: CONFIG.COMMIT_MESSAGE,
-                        content: encodedContent,
-                        sha: state.githubData.sha
-                    })
-                });
-
-                if (response.ok) {
-                    const data = await response.json();
-                    state.githubData.sha = data.content.sha;
-                    state.githubData.content = content;
-                    return true;
-                } else {
-                    const error = await response.json();
-                    throw new Error(error.message || '保存到GitHub失败');
-                }
-            } catch (error) {
-                console.error('保存到GitHub失败:', error);
-                showError(`保存到GitHub失败: ${error.message}`);
-                return false;
-            }
-        }
-
-        // 保存记录到本地存储
-        function saveToLocalStorage() {
-            localStorage.setItem(CONFIG.LOCAL_STORAGE_KEY, JSON.stringify(state.records));
-        }
-
-        // 处理添加记录
-        async function handleAddRecord() {
-            // 验证输入
+        // 添加记录
+        async function addRecord() {
             const date = elements.waterDate.value;
             const type = elements.flowerType.value;
             const user = elements.userName.value.trim();
-
-            if (!date) {
-                showError('请选择浇水日期');
+            
+            if (!date || !type || !user) {
+                showMessage('请填写完整信息', 'error');
                 return;
             }
-
-            if (!type) {
-                showError('请选择花卉种类');
-                return;
-            }
-
-            if (!user) {
-                showError('请输入记录人姓名');
-                return;
-            }
-
-            // 创建新记录对象
+            
             const newRecord = {
-                id: Date.now().toString(),
+                id: Date.now(),
                 date,
                 type,
                 user,
                 timestamp: new Date().toISOString()
             };
-
-            // 添加到本地状态
-            state.records.unshift(newRecord);
             
-            // 保存数据
-            let saveSuccess = true;
-            if (!state.useLocalStorage) {
-                saveSuccess = await saveToGitHub();
-            }
+            // 添加到本地待提交
+            const pending = JSON.parse(localStorage.getItem(CONFIG.LOCAL_KEY)) || [];
+            pending.push(newRecord);
+            localStorage.setItem(CONFIG.LOCAL_KEY, JSON.stringify(pending));
             
-            if (state.useLocalStorage || !saveSuccess) {
-                saveToLocalStorage();
-                state.useLocalStorage = true;
-                showSuccess('记录已保存到本地存储');
-            } else {
-                showSuccess('记录已保存到GitHub');
-            }
-            
+            // 更新显示
+            pendingRecords.push(newRecord);
             renderRecords();
             
-            // 重置表单
-            elements.flowerType.value = '';
+            // 清空表单
             elements.userName.value = '';
+            elements.flowerType.value = '';
+            
+            showMessage('记录已保存，等待管理员审核', 'success');
         }
 
-        // 渲染记录表格
-        function renderRecords(filter = 'all') {
-            const filteredRecords = filter === 'all' 
-                ? state.records 
-                : state.records.filter(item => item.type === filter);
+        // 渲染记录
+        function renderRecords() {
+            const filter = elements.filterType.value;
+            const filtered = filter === 'all' 
+                ? [...records, ...pendingRecords]
+                : [...records, ...pendingRecords].filter(r => r.type === filter);
             
-            if (filteredRecords.length === 0) {
-                elements.recordsBody.innerHTML = '<tr><td colspan="4">没有找到记录</td></tr>';
+            if (filtered.length === 0) {
+                elements.recordsBody.innerHTML = '<tr><td colspan="4">暂无记录</td></tr>';
                 return;
             }
             
-            elements.recordsBody.innerHTML = filteredRecords.map(record => `
+            // 按日期排序
+            filtered.sort((a, b) => new Date(b.date) - new Date(a.date));
+            
+            elements.recordsBody.innerHTML = filtered.map(record => `
                 <tr>
                     <td>${record.date}</td>
                     <td>${record.type}</td>
-                    <td>${record.user || '未填写'}</td>
+                    <td>${record.user}</td>
                     <td>
-                        <button class="delete-btn" data-id="${record.id}">删除</button>
+                        ${records.some(r => r.id === record.id) ? '' : 
+                         '<span class="pending">待审核</span>'}
                     </td>
                 </tr>
             `).join('');
-            
-            // 添加删除按钮事件监听器
-            document.querySelectorAll('.delete-btn').forEach(button => {
-                button.addEventListener('click', (e) => {
-                    const id = e.target.getAttribute('data-id');
-                    deleteRecord(id);
-                });
-            });
         }
 
-        // 删除记录
-        async function deleteRecord(id) {
-            if (!confirm('确定要删除这条记录吗？')) return;
-            
-            state.records = state.records.filter(record => record.id !== id);
-            
-            let saveSuccess = true;
-            if (!state.useLocalStorage) {
-                saveSuccess = await saveToGitHub();
-            }
-            
-            if (state.useLocalStorage || !saveSuccess) {
-                saveToLocalStorage();
-                state.useLocalStorage = true;
-                showSuccess('记录已从本地存储删除');
-            } else {
-                showSuccess('记录已从GitHub删除');
-            }
-            
-            renderRecords(elements.filterFlowerType.value);
+        // 筛选记录
+        function filterRecords() {
+            renderRecords();
+            showMessage('筛选已应用', 'success');
         }
 
-        // 设置加载状态
-        function setLoading(loading) {
-            state.isLoading = loading;
-            elements.loader.style.display = loading ? 'block' : 'none';
-            elements.addButton.disabled = loading;
-            elements.filterButton.disabled = loading;
-            elements.refreshButton.disabled = loading;
+        // 显示加载状态
+        function showLoading() {
+            elements.recordsBody.innerHTML = '<tr><td colspan="4">加载中...</td></tr>';
         }
 
-        // 显示错误消息
-        function showError(message) {
-            if (!message) {
-                elements.errorMessage.style.display = 'none';
-                return;
-            }
+        // 显示消息
+        function showMessage(text, type) {
+            elements.message.textContent = text;
+            elements.message.className = `message ${type}`;
+            elements.message.style.display = 'block';
             
-            elements.errorMessage.textContent = message;
-            elements.errorMessage.style.display = 'block';
-            elements.successMessage.style.display = 'none';
-            
-            // 3秒后自动隐藏
             setTimeout(() => {
-                elements.errorMessage.style.display = 'none';
-            }, 3000);
-        }
-
-        // 显示成功消息
-        function showSuccess(message) {
-            if (!message) {
-                elements.successMessage.style.display = 'none';
-                return;
-            }
-            
-            elements.successMessage.textContent = message;
-            elements.successMessage.style.display = 'block';
-            elements.errorMessage.style.display = 'none';
-            
-            // 3秒后自动隐藏
-            setTimeout(() => {
-                elements.successMessage.style.display = 'none';
+                elements.message.style.display = 'none';
             }, 3000);
         }
 
         // 启动应用
-        document.addEventListener('DOMContentLoaded', initApp);
+        document.addEventListener('DOMContentLoaded', init);
     </script>
 </body>
 </html>
