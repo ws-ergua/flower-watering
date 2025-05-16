@@ -3,7 +3,6 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'unsafe-inline' 'self'; style-src 'unsafe-inline' 'self'">
     <title>爱美特水务花卉浇水记录</title>
     <style>
         :root {
@@ -213,12 +212,11 @@
     </footer>
 
     <script>
-        // 安全配置（已移除Token）
+        // 修复后的配置
         const CONFIG = {
             DATA_URL: 'https://raw.githubusercontent.com/ws-ergua/flower-watering/main/data/records.json',
             SUBMIT_URL: 'https://api.github.com/repos/ws-ergua/flower-watering/issues',
-            DEFAULT_RECORDS: [],
-            LOCAL_STORAGE_KEY: 'flowerWateringRecords',
+            LOCAL_STORAGE_KEY: 'flowerWateringRecords_v2',
             SYNC_INTERVAL: 30000
         };
 
@@ -241,23 +239,27 @@
         const state = {
             records: [],
             isLoading: false,
-            useLocalStorage: false,
-            syncTimer: null
+            useLocalStorage: false
         };
 
         // 初始化应用
-        async function initApp() {
+        function initApp() {
             elements.currentYear.textContent = new Date().getFullYear();
-            elements.waterDate.value = new Date().toISOString().split('T')[0];
+            elements.waterDate.valueAsDate = new Date();
+            
+            // 修复：确保事件监听器正确绑定
             setupEventListeners();
-            await loadRecords();
-            state.syncTimer = setInterval(() => loadRecords(), CONFIG.SYNC_INTERVAL);
+            loadRecords();
         }
 
-        // 设置事件监听器
+        // 设置事件监听器（修复版）
         function setupEventListeners() {
+            // 修复：移除旧事件监听器后重新添加
+            elements.addButton.replaceWith(elements.addButton.cloneNode(true));
+            elements.addButton = document.getElementById('addButton');
+            
             elements.addButton.addEventListener('click', handleAddRecord);
-            elements.filterButton.addEventListener('click', () => renderRecords(elements.filterFlowerType.value));
+            elements.filterButton.addEventListener('click', applyFilters);
             elements.userName.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') handleAddRecord();
             });
@@ -269,23 +271,37 @@
             try {
                 const response = await fetch(`${CONFIG.DATA_URL}?t=${Date.now()}`);
                 if (response.ok) {
-                    const data = await response.json();
-                    state.records = Array.isArray(data) ? data : CONFIG.DEFAULT_RECORDS;
+                    state.records = await response.json();
                     state.useLocalStorage = false;
-                    showSuccess('数据已同步');
+                    showSuccess('数据加载成功');
                 } else {
-                    throw new Error('数据加载失败');
+                    throw new Error(`HTTP ${response.status}`);
                 }
             } catch (error) {
                 console.error('加载失败:', error);
+                loadFromLocalStorage();
             } finally {
-                renderRecords();
+                applyFilters();
                 setLoading(false);
             }
         }
 
-        // 处理添加记录
+        // 从本地存储加载
+        function loadFromLocalStorage() {
+            const localData = localStorage.getItem(CONFIG.LOCAL_STORAGE_KEY);
+            if (localData) {
+                state.records = JSON.parse(localData);
+                state.useLocalStorage = true;
+                showError('使用本地缓存数据');
+            } else {
+                state.records = [];
+                showError('无可用数据');
+            }
+        }
+
+        // 处理添加记录（修复版）
         async function handleAddRecord() {
+            // 验证输入
             const date = elements.waterDate.value;
             const type = elements.flowerType.value;
             const user = elements.userName.value.trim();
@@ -294,6 +310,7 @@
             if (!type) { showError('请选择花卉种类'); return; }
             if (!user) { showError('请输入记录人姓名'); return; }
 
+            // 创建新记录
             const newRecord = {
                 id: Date.now().toString(),
                 date,
@@ -302,14 +319,25 @@
                 timestamp: new Date().toISOString()
             };
 
+            // 添加到本地
             state.records.unshift(newRecord);
-            await submitRecordToGitHub(newRecord);
-            renderRecords();
-            elements.flowerType.value = '';
-            elements.userName.value = '';
+            
+            // 尝试提交到GitHub
+            try {
+                await submitRecordToGitHub(newRecord);
+                showSuccess('记录提交成功');
+            } catch (error) {
+                console.error('提交失败:', error);
+                saveToLocalStorage();
+                showError('提交失败，已保存到本地');
+            }
+
+            // 更新UI
+            applyFilters();
+            resetForm();
         }
 
-        // 提交记录到GitHub（安全版本）
+        // 提交记录到GitHub（修复版）
         async function submitRecordToGitHub(record) {
             setLoading(true);
             try {
@@ -326,52 +354,69 @@
                     })
                 });
 
-                if (response.ok) {
-                    showSuccess('记录已提交，等待管理员同步');
-                } else {
-                    const error = await response.json();
-                    throw new Error(error.message || '提交失败');
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.message || '提交失败');
                 }
-            } catch (error) {
-                console.error('提交失败:', error);
-                showError(`提交失败: ${error.message}`);
-                saveToLocalStorage([...state.records]);
             } finally {
                 setLoading(false);
             }
         }
 
-        // 辅助函数（保持原有实现）
-        function saveToLocalStorage(records) {
-            localStorage.setItem(CONFIG.LOCAL_STORAGE_KEY, JSON.stringify(records));
+        // 保存到本地存储
+        function saveToLocalStorage() {
+            localStorage.setItem(CONFIG.LOCAL_STORAGE_KEY, JSON.stringify(state.records));
         }
 
-        function renderRecords(filter = 'all') {
-            const filteredRecords = filter === 'all' 
+        // 应用筛选
+        function applyFilters() {
+            const filter = elements.filterFlowerType.value;
+            const filtered = filter === 'all' 
                 ? state.records 
                 : state.records.filter(item => item.type === filter);
-            
-            elements.recordsBody.innerHTML = filteredRecords.length > 0 
-                ? filteredRecords.map(record => `
+            renderRecords(filtered);
+        }
+
+        // 渲染记录
+        function renderRecords(records) {
+            elements.recordsBody.innerHTML = records.length > 0
+                ? records.map(record => `
                     <tr>
                         <td>${record.date}</td>
                         <td>${record.type}</td>
-                        <td>${record.user || '未填写'}</td>
+                        <td>${record.user}</td>
                         <td><button class="delete-btn" data-id="${record.id}">删除</button></td>
                     </tr>
                 `).join('')
                 : '<tr><td colspan="4">没有找到记录</td></tr>';
             
+            // 绑定删除事件
             document.querySelectorAll('.delete-btn').forEach(btn => {
                 btn.addEventListener('click', (e) => {
-                    if (confirm('确定删除？')) {
-                        state.records = state.records.filter(r => r.id !== e.target.dataset.id);
-                        renderRecords(elements.filterFlowerType.value);
+                    if (confirm('确定删除此记录吗？')) {
+                        deleteRecord(e.target.dataset.id);
                     }
                 });
             });
         }
 
+        // 删除记录
+        function deleteRecord(id) {
+            state.records = state.records.filter(record => record.id !== id);
+            if (state.useLocalStorage) {
+                saveToLocalStorage();
+            }
+            applyFilters();
+        }
+
+        // 重置表单
+        function resetForm() {
+            elements.flowerType.value = '';
+            elements.userName.value = '';
+            elements.waterDate.focus();
+        }
+
+        // 设置加载状态
         function setLoading(loading) {
             state.isLoading = loading;
             elements.loader.style.display = loading ? 'block' : 'none';
@@ -379,16 +424,16 @@
             elements.filterButton.disabled = loading;
         }
 
+        // 显示错误消息
         function showError(message) {
-            if (!message) return;
             elements.errorMessage.textContent = message;
             elements.errorMessage.style.display = 'block';
             elements.successMessage.style.display = 'none';
-            setTimeout(() => elements.errorMessage.style.display = 'none', 3000);
+            setTimeout(() => elements.errorMessage.style.display = 'none', 5000);
         }
 
+        // 显示成功消息
         function showSuccess(message) {
-            if (!message) return;
             elements.successMessage.textContent = message;
             elements.successMessage.style.display = 'block';
             elements.errorMessage.style.display = 'none';
