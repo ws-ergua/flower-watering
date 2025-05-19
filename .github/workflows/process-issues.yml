@@ -2,7 +2,7 @@ name: Process Watering Records
 
 on:
   issues:
-    types: [opened, edited, deleted, closed, reopened, labeled, unlabeled]
+    types: [opened, edited, labeled, unlabeled, closed, reopened]
   workflow_dispatch:
   schedule:
     - cron: '0 */6 * * *'
@@ -26,24 +26,34 @@ jobs:
       - name: Create data directory
         run: mkdir -p data
       
-      - name: Create processing script
+      - name: Process issues to JSON
         run: |
+          echo "Creating processing script..."
           cat > process.js << 'EOF'
           const fs = require('fs');
           const https = require('https');
           
-          function fetchIssues() {
+          // 获取环境变量
+          const repo = process.env.GITHUB_REPOSITORY;
+          const token = process.env.GITHUB_TOKEN;
+          
+          console.log(`Processing issues for repository: ${repo}`);
+          
+          // 获取所有Issues
+          function fetchAllIssues() {
             return new Promise((resolve, reject) => {
               const options = {
                 hostname: 'api.github.com',
-                path: '/repos/' + process.env.GITHUB_REPOSITORY + '/issues?state=all&labels=watering-record&per_page=100',
+                path: `/repos/${repo}/issues?state=all&per_page=100`,
                 method: 'GET',
                 headers: {
                   'User-Agent': 'GitHub-Action-Script',
                   'Accept': 'application/vnd.github.v3+json',
-                  'Authorization': 'token ' + process.env.GITHUB_TOKEN
+                  'Authorization': `token ${token}`
                 }
               };
+              
+              console.log(`Fetching issues from: ${options.hostname}${options.path}`);
               
               const req = https.request(options, (res) => {
                 let data = '';
@@ -54,6 +64,8 @@ jobs:
                 
                 res.on('end', () => {
                   if (res.statusCode !== 200) {
+                    console.error(`API request failed with status code ${res.statusCode}`);
+                    console.error(`Response: ${data}`);
                     reject(new Error(`API request failed with status code ${res.statusCode}`));
                     return;
                   }
@@ -62,12 +74,14 @@ jobs:
                     const issues = JSON.parse(data);
                     resolve(issues);
                   } catch (error) {
+                    console.error('Failed to parse response:', error);
                     reject(error);
                   }
                 });
               });
               
               req.on('error', (error) => {
+                console.error('Request error:', error);
                 reject(error);
               });
               
@@ -75,61 +89,102 @@ jobs:
             });
           }
           
+          // 解析Issue内容
           function parseIssueBody(body) {
+            if (!body) return {};
+            
             const record = {};
             
-            const typeMatch = body.match(/\*\*花卉种类\*\*:\s*(.*?)(?:\n|$)/);
-            if (typeMatch) record.type = typeMatch[1].trim();
-            
-            const dateMatch = body.match(/\*\*浇水日期\*\*:\s*(.*?)(?:\n|$)/);
-            if (dateMatch) record.date = dateMatch[1].trim();
-            
-            const userMatch = body.match(/\*\*记录人\*\*:\s*(.*?)(?:\n|$)/);
-            if (userMatch) record.user = userMatch[1].trim();
-            
-            const timestampMatch = body.match(/\*\*时间戳\*\*:\s*(.*?)(?:\n|$)/);
-            if (timestampMatch) record.timestamp = timestampMatch[1].trim();
-            
-            const idMatch = body.match(/\*\*记录ID\*\*:\s*(.*?)(?:\n|$)/);
-            if (idMatch) record.id = idMatch[1].trim();
-            else record.id = Date.now().toString();
+            try {
+              const typeMatch = body.match(/\*\*花卉种类\*\*:\s*(.*?)(?:\n|$)/);
+              if (typeMatch) record.type = typeMatch[1].trim();
+              
+              const dateMatch = body.match(/\*\*浇水日期\*\*:\s*(.*?)(?:\n|$)/);
+              if (dateMatch) record.date = dateMatch[1].trim();
+              
+              const userMatch = body.match(/\*\*记录人\*\*:\s*(.*?)(?:\n|$)/);
+              if (userMatch) record.user = userMatch[1].trim();
+              
+              const timestampMatch = body.match(/\*\*时间戳\*\*:\s*(.*?)(?:\n|$)/);
+              if (timestampMatch) record.timestamp = timestampMatch[1].trim();
+              
+              const idMatch = body.match(/\*\*记录ID\*\*:\s*(.*?)(?:\n|$)/);
+              if (idMatch) record.id = idMatch[1].trim();
+              else record.id = Date.now().toString();
+            } catch (error) {
+              console.error('Error parsing issue body:', error);
+            }
             
             return record;
           }
           
+          // 主函数
           async function main() {
             try {
-              console.log('Fetching issues...');
-              const issues = await fetchIssues();
-              console.log(`Found ${issues.length} issues`);
+              console.log('Starting to process issues...');
               
-              const openIssues = issues.filter(issue => issue.state === 'open');
-              console.log(`Processing ${openIssues.length} open issues`);
+              // 获取所有Issues
+              const allIssues = await fetchAllIssues();
+              console.log(`Found ${allIssues.length} total issues`);
               
+              // 筛选出浇水记录Issues
+              const wateringIssues = allIssues.filter(issue => {
+                // 检查是否有watering-record标签
+                const hasWateringLabel = issue.labels && 
+                  issue.labels.some(label => label.name === 'watering-record');
+                
+                // 检查标题是否包含"浇水记录"
+                const titleHasWatering = issue.title && 
+                  (issue.title.includes('浇水记录') || issue.title.includes('新浇水记录'));
+                
+                return hasWateringLabel || titleHasWatering;
+              });
+              
+              console.log(`Found ${wateringIssues.length} watering record issues`);
+              
+              // 只处理打开的Issues
+              const openIssues = wateringIssues.filter(issue => issue.state === 'open');
+              console.log(`Processing ${openIssues.length} open watering record issues`);
+              
+              // 解析每个Issue的内容
               const records = openIssues.map(issue => {
-                const record = parseIssueBody(issue.body || '');
+                console.log(`Processing issue #${issue.number}: ${issue.title}`);
+                
+                const record = parseIssueBody(issue.body);
                 record.issue_number = issue.number;
                 record.issue_url = issue.html_url;
+                record.issue_title = issue.title;
+                
                 return record;
               });
               
+              // 按时间戳排序（最新的在前）
               records.sort((a, b) => {
                 return new Date(b.timestamp || 0) - new Date(a.timestamp || 0);
               });
               
-              fs.writeFileSync('data/records.json', JSON.stringify(records, null, 2));
-              console.log(`Successfully wrote ${records.length} records to data/records.json`);
+              // 写入JSON文件
+              const outputPath = 'data/records.json';
+              fs.writeFileSync(outputPath, JSON.stringify(records, null, 2));
+              console.log(`Successfully wrote ${records.length} records to ${outputPath}`);
+              
+              // 如果没有记录，创建一个空数组
+              if (records.length === 0) {
+                console.log('No records found, creating empty array in records.json');
+                fs.writeFileSync(outputPath, '[]');
+              }
             } catch (error) {
-              console.error('Error processing issues:', error);
+              console.error('Error in main function:', error);
               process.exit(1);
             }
           }
           
+          // 执行主函数
           main();
           EOF
-      
-      - name: Run processing script
-        run: node process.js
+          
+          echo "Running processing script..."
+          node process.js
       
       - name: Commit and push changes
         run: |
