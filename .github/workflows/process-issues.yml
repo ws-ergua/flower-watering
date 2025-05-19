@@ -5,7 +5,7 @@ on:
     types: [opened, edited, deleted, closed, reopened, labeled, unlabeled]
   workflow_dispatch:
   schedule:
-    - cron: '0 */6 * * *'  # 每6小时运行一次
+    - cron: '0 */6 * * *'
 
 jobs:
   process-issues:
@@ -21,75 +21,75 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '18'
+          node-version: '16'
       
-      - name: Create data directory if not exists
+      - name: Create data directory
         run: mkdir -p data
       
-      - name: Process Issues to JSON
+      - name: Create processing script
         run: |
-          # 创建处理脚本
-          cat > process-issues.js << 'EOF'
+          cat > process.js << 'EOF'
           const fs = require('fs');
-          const path = require('path');
+          const https = require('https');
           
-          async function fetchIssues() {
-            const owner = process.env.GITHUB_REPOSITORY.split('/')[0];
-            const repo = process.env.GITHUB_REPOSITORY.split('/')[1];
-            const token = process.env.GITHUB_TOKEN;
-            
-            let allIssues = [];
-            let page = 1;
-            let hasMore = true;
-            
-            while (hasMore) {
-              const response = await fetch(
-                `https://api.github.com/repos/${owner}/${repo}/issues?state=all&labels=watering-record&per_page=100&page=${page}`,
-                {
-                  headers: {
-                    'Authorization': `token ${token}`,
-                    'Accept': 'application/vnd.github.v3+json'
-                  }
+          function fetchIssues() {
+            return new Promise((resolve, reject) => {
+              const options = {
+                hostname: 'api.github.com',
+                path: '/repos/' + process.env.GITHUB_REPOSITORY + '/issues?state=all&labels=watering-record&per_page=100',
+                method: 'GET',
+                headers: {
+                  'User-Agent': 'GitHub-Action-Script',
+                  'Accept': 'application/vnd.github.v3+json',
+                  'Authorization': 'token ' + process.env.GITHUB_TOKEN
                 }
-              );
+              };
               
-              if (!response.ok) {
-                throw new Error(`GitHub API error: ${response.status}`);
-              }
+              const req = https.request(options, (res) => {
+                let data = '';
+                
+                res.on('data', (chunk) => {
+                  data += chunk;
+                });
+                
+                res.on('end', () => {
+                  if (res.statusCode !== 200) {
+                    reject(new Error(`API request failed with status code ${res.statusCode}`));
+                    return;
+                  }
+                  
+                  try {
+                    const issues = JSON.parse(data);
+                    resolve(issues);
+                  } catch (error) {
+                    reject(error);
+                  }
+                });
+              });
               
-              const issues = await response.json();
+              req.on('error', (error) => {
+                reject(error);
+              });
               
-              if (issues.length === 0) {
-                hasMore = false;
-              } else {
-                allIssues = allIssues.concat(issues);
-                page++;
-              }
-            }
-            
-            return allIssues;
+              req.end();
+            });
           }
           
           function parseIssueBody(body) {
             const record = {};
             
-            // 解析花卉种类
             const typeMatch = body.match(/\*\*花卉种类\*\*:\s*(.*?)(?:\n|$)/);
             if (typeMatch) record.type = typeMatch[1].trim();
             
-            // 解析浇水日期
             const dateMatch = body.match(/\*\*浇水日期\*\*:\s*(.*?)(?:\n|$)/);
             if (dateMatch) record.date = dateMatch[1].trim();
             
-            // 解析记录人
             const userMatch = body.match(/\*\*记录人\*\*:\s*(.*?)(?:\n|$)/);
             if (userMatch) record.user = userMatch[1].trim();
             
-            // 解析时间戳
             const timestampMatch = body.match(/\*\*时间戳\*\*:\s*(.*?)(?:\n|$)/);
             if (timestampMatch) record.timestamp = timestampMatch[1].trim();
             
-            // 解析记录ID
             const idMatch = body.match(/\*\*记录ID\*\*:\s*(.*?)(?:\n|$)/);
             if (idMatch) record.id = idMatch[1].trim();
             else record.id = Date.now().toString();
@@ -99,33 +99,25 @@ jobs:
           
           async function main() {
             try {
-              // 获取所有带有watering-record标签的issue
+              console.log('Fetching issues...');
               const issues = await fetchIssues();
-              console.log(`Found ${issues.length} issues with watering-record label`);
+              console.log(`Found ${issues.length} issues`);
               
-              // 只处理打开的issue
               const openIssues = issues.filter(issue => issue.state === 'open');
               console.log(`Processing ${openIssues.length} open issues`);
               
-              // 解析每个issue的内容
               const records = openIssues.map(issue => {
-                const record = parseIssueBody(issue.body);
+                const record = parseIssueBody(issue.body || '');
                 record.issue_number = issue.number;
                 record.issue_url = issue.html_url;
                 return record;
               });
               
-              // 按时间戳排序（最新的在前）
               records.sort((a, b) => {
-                return new Date(b.timestamp) - new Date(a.timestamp);
+                return new Date(b.timestamp || 0) - new Date(a.timestamp || 0);
               });
               
-              // 写入JSON文件
-              fs.writeFileSync(
-                path.join('data', 'records.json'),
-                JSON.stringify(records, null, 2)
-              );
-              
+              fs.writeFileSync('data/records.json', JSON.stringify(records, null, 2));
               console.log(`Successfully wrote ${records.length} records to data/records.json`);
             } catch (error) {
               console.error('Error processing issues:', error);
@@ -135,11 +127,11 @@ jobs:
           
           main();
           EOF
-          
-          # 运行脚本
-          node process-issues.js
       
-      - name: Commit and push if changed
+      - name: Run processing script
+        run: node process.js
+      
+      - name: Commit and push changes
         run: |
           git config --global user.name 'GitHub Actions'
           git config --global user.email 'actions@github.com'
