@@ -3,7 +3,6 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'unsafe-inline' 'self'; style-src 'unsafe-inline' 'self'; connect-src 'self' https://api.github.com https://raw.githubusercontent.com">
     <title>爱美特水务花卉浇水记录</title>
     <style>
         :root {
@@ -143,49 +142,11 @@
             font-size: 14px;
         }
 
-        .sync-button {
-            display: block;
-            margin: 10px auto;
-            background-color: #333;
-        }
-
-        .admin-section {
-            margin-top: 20px;
-            border-top: 1px dashed var(--border);
-            padding-top: 15px;
-        }
-
-        .admin-title {
-            font-size: 1rem;
-            margin-bottom: 10px;
-            color: #666;
-        }
-
-        .admin-button {
-            background: #333;
-            margin-right: 10px;
-        }
-
-        .export-area {
-            width: 100%;
-            height: 150px;
-            margin-top: 10px;
-            padding: 10px;
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            font-family: monospace;
-            font-size: 12px;
+        .hidden-iframe {
             display: none;
-        }
-
-        .pending-badge {
-            display: inline-block;
-            background-color: #ff9800;
-            color: white;
-            font-size: 0.7rem;
-            padding: 2px 5px;
-            border-radius: 3px;
-            margin-left: 5px;
+            width: 0;
+            height: 0;
+            border: 0;
         }
 
         @media (max-width: 600px) {
@@ -207,18 +168,25 @@
     </div>
     
     <div class="section">
-        <div class="input-row">
-            <input type="date" id="waterDate">
-            <select id="flowerType">
-                <option value="">选择花卉</option>
-                <option value="龙血树">龙血树</option>
-                <option value="马拉巴栗">马拉巴栗</option>
-            </select>
-        </div>
-        <div class="input-row">
-            <input type="text" id="userName" placeholder="记录人姓名" required>
-            <button id="addButton" type="button">添加记录</button>
-        </div>
+        <form id="recordForm" target="submitFrame" method="post">
+            <div class="input-row">
+                <input type="date" id="waterDate" name="waterDate">
+                <select id="flowerType" name="flowerType">
+                    <option value="">选择花卉</option>
+                    <option value="龙血树">龙血树</option>
+                    <option value="马拉巴栗">马拉巴栗</option>
+                </select>
+            </div>
+            <div class="input-row">
+                <input type="text" id="userName" name="userName" placeholder="记录人姓名" required>
+                <button id="addButton" type="button">添加记录</button>
+            </div>
+            <input type="hidden" id="recordId" name="recordId">
+            <input type="hidden" id="timestamp" name="timestamp">
+            <input type="hidden" name="title" id="issueTitle">
+            <input type="hidden" name="body" id="issueBody">
+            <input type="hidden" name="labels[]" value="watering-record">
+        </form>
         <div id="errorMessage" class="error-message"></div>
         <div id="successMessage" class="success-message"></div>
     </div>
@@ -232,7 +200,6 @@
             </select>
             <button id="filterButton" type="button">筛选记录</button>
         </div>
-        <button id="syncButton" class="sync-button" type="button">从服务器同步数据</button>
     </div>
 
     <div class="section">
@@ -243,25 +210,17 @@
                     <th>浇水日期</th>
                     <th>花卉种类</th>
                     <th>记录人</th>
-                    <th>操作</th>
                 </tr>
             </thead>
             <tbody id="recordsBody">
                 <tr>
-                    <td colspan="4">正在加载数据...</td>
+                    <td colspan="3">正在加载数据...</td>
                 </tr>
             </tbody>
         </table>
     </div>
 
-    <div class="section admin-section">
-        <h3 class="admin-title">管理员功能</h3>
-        <div class="input-row">
-            <button id="exportButton" class="admin-button" type="button">导出待审核记录</button>
-            <button id="clearPendingButton" class="admin-button" type="button">清空待审核记录</button>
-        </div>
-        <textarea id="exportArea" class="export-area" placeholder="导出的记录将显示在这里..."></textarea>
-    </div>
+    <iframe name="submitFrame" id="submitFrame" class="hidden-iframe"></iframe>
 
     <footer>
         <p>© <span id="currentYear"></span> 爱美特水务. All Rights Reserved.</p>
@@ -276,27 +235,27 @@
             get DATA_URL() {
                 return `https://raw.githubusercontent.com/${this.GITHUB_USERNAME}/${this.REPO_NAME}/main/${this.DATA_FILE_PATH}?t=${Date.now()}`;
             },
-            get GITHUB_ISSUES_URL() {
+            get GITHUB_FORM_URL() {
                 return `https://github.com/${this.GITHUB_USERNAME}/${this.REPO_NAME}/issues/new`;
             },
-            DEFAULT_RECORDS: [],
             LOCAL_STORAGE_KEY: 'flowerWateringRecords',
-            PENDING_STORAGE_KEY: 'pendingWateringRecords',
             SYNC_INTERVAL: 60000 // 60秒同步一次
         };
 
         // DOM元素引用
         const elements = {
+            recordForm: document.getElementById('recordForm'),
             waterDate: document.getElementById('waterDate'),
             flowerType: document.getElementById('flowerType'),
             userName: document.getElementById('userName'),
+            recordId: document.getElementById('recordId'),
+            timestamp: document.getElementById('timestamp'),
+            issueTitle: document.getElementById('issueTitle'),
+            issueBody: document.getElementById('issueBody'),
             addButton: document.getElementById('addButton'),
             filterFlowerType: document.getElementById('filterFlowerType'),
             filterButton: document.getElementById('filterButton'),
-            syncButton: document.getElementById('syncButton'),
-            exportButton: document.getElementById('exportButton'),
-            clearPendingButton: document.getElementById('clearPendingButton'),
-            exportArea: document.getElementById('exportArea'),
+            submitFrame: document.getElementById('submitFrame'),
             loader: document.getElementById('loader'),
             errorMessage: document.getElementById('errorMessage'),
             successMessage: document.getElementById('successMessage'),
@@ -307,7 +266,6 @@
         // 应用状态
         const state = {
             records: [],
-            pendingRecords: [],
             isLoading: false,
             syncTimer: null
         };
@@ -320,8 +278,8 @@
             // 设置默认日期为今天
             elements.waterDate.value = new Date().toISOString().split('T')[0];
             
-            // 从本地存储加载数据
-            loadFromLocalStorage();
+            // 设置表单提交地址
+            elements.recordForm.action = CONFIG.GITHUB_FORM_URL;
             
             // 从GitHub加载数据
             loadFromGitHub();
@@ -345,58 +303,32 @@
                 renderRecords(elements.filterFlowerType.value);
             };
             
-            // 同步按钮
-            elements.syncButton.onclick = function() {
-                loadFromGitHub();
-            };
-            
-            // 导出按钮
-            elements.exportButton.onclick = function() {
-                exportPendingRecords();
-            };
-            
-            // 清空待审核按钮
-            elements.clearPendingButton.onclick = function() {
-                clearPendingRecords();
-            };
-            
             // 添加键盘支持 - 在输入框中按Enter键提交
             elements.userName.onkeypress = function(e) {
                 if (e.key === 'Enter') {
                     handleAddRecord();
                 }
             };
-        }
-
-        // 从本地存储加载数据
-        function loadFromLocalStorage() {
-            try {
-                // 加载已同步记录
-                const recordsData = localStorage.getItem(CONFIG.LOCAL_STORAGE_KEY);
-                if (recordsData) {
-                    state.records = JSON.parse(recordsData);
+            
+            // iframe加载完成事件
+            elements.submitFrame.onload = function() {
+                if (this.contentDocument.URL.includes('github.com')) {
+                    showSuccess('记录已成功提交到GitHub，等待管理员审核');
+                    setLoading(false);
+                    
+                    // 重置表单
+                    elements.flowerType.value = '';
+                    elements.userName.value = '';
+                    
+                    // 重新加载数据
+                    setTimeout(loadFromGitHub, 2000);
                 }
-                
-                // 加载待审核记录
-                const pendingData = localStorage.getItem(CONFIG.PENDING_STORAGE_KEY);
-                if (pendingData) {
-                    state.pendingRecords = JSON.parse(pendingData);
-                }
-                
-                // 渲染记录
-                renderRecords();
-            } catch (error) {
-                console.error('从本地存储加载数据失败:', error);
-                state.records = CONFIG.DEFAULT_RECORDS;
-                state.pendingRecords = [];
-                renderRecords();
-            }
+            };
         }
 
         // 从GitHub加载数据
         function loadFromGitHub() {
             setLoading(true);
-            showSuccess('正在从服务器同步数据...');
             
             fetch(CONFIG.DATA_URL)
                 .then(response => {
@@ -417,15 +349,24 @@
                         
                         // 重新渲染
                         renderRecords();
-                        
-                        showSuccess('数据已从服务器同步');
                     } else {
                         throw new Error('服务器返回的数据格式不正确');
                     }
                 })
                 .catch(error => {
                     console.error('从服务器加载数据失败:', error);
-                    showError(`同步失败: ${error.message}`);
+                    showError(`加载失败: ${error.message}`);
+                    
+                    // 尝试从本地存储加载
+                    try {
+                        const localData = localStorage.getItem(CONFIG.LOCAL_STORAGE_KEY);
+                        if (localData) {
+                            state.records = JSON.parse(localData);
+                            renderRecords();
+                        }
+                    } catch (e) {
+                        console.error('从本地存储加载失败:', e);
+                    }
                 })
                 .finally(() => {
                     setLoading(false);
@@ -454,93 +395,55 @@
                 return;
             }
 
-            // 创建新记录对象
+            // 创建记录ID和时间戳
+            const recordId = Date.now().toString();
+            const timestamp = new Date().toISOString();
+            
+            // 设置隐藏字段
+            elements.recordId.value = recordId;
+            elements.timestamp.value = timestamp;
+            
+            // 设置Issue标题和内容
+            const issueTitle = `新浇水记录: ${type} - ${user}`;
+            const issueBody = `**花卉种类**: ${type}\n\n` +
+                             `**浇水日期**: ${date}\n\n` +
+                             `**记录人**: ${user}\n\n` +
+                             `**时间戳**: ${timestamp}\n\n` +
+                             `**记录ID**: ${recordId}`;
+            
+            elements.issueTitle.value = issueTitle;
+            elements.issueBody.value = issueBody;
+            
+            // 显示加载状态
+            setLoading(true);
+            showSuccess('正在提交记录...');
+            
+            // 提交表单
+            elements.recordForm.submit();
+            
+            // 添加临时记录到本地显示
             const newRecord = {
-                id: Date.now().toString(),
+                id: recordId,
                 date,
                 type,
                 user,
-                timestamp: new Date().toISOString()
+                timestamp,
+                pending: true
             };
-
-            // 添加到待审核记录
-            state.pendingRecords.push(newRecord);
-            savePendingRecords();
             
-            // 重新渲染
+            // 添加到记录列表并重新渲染
+            state.records.unshift(newRecord);
             renderRecords();
-            
-            // 重置表单
-            elements.flowerType.value = '';
-            elements.userName.value = '';
-            
-            showSuccess('记录已添加，等待管理员审核');
-        }
-
-        // 保存待审核记录到本地存储
-        function savePendingRecords() {
-            try {
-                localStorage.setItem(CONFIG.PENDING_STORAGE_KEY, JSON.stringify(state.pendingRecords));
-            } catch (error) {
-                console.error('保存待审核记录失败:', error);
-                showError('保存失败，请检查浏览器存储空间');
-            }
-        }
-
-        // 导出待审核记录
-        function exportPendingRecords() {
-            if (state.pendingRecords.length === 0) {
-                showError('没有待审核的记录');
-                elements.exportArea.style.display = 'none';
-                return;
-            }
-            
-            // 格式化为GitHub Issues格式
-            const formattedRecords = state.pendingRecords.map(record => {
-                return `### 新浇水记录: ${record.type} - ${record.user}\n\n` +
-                       `**花卉种类**: ${record.type}\n\n` +
-                       `**浇水日期**: ${record.date}\n\n` +
-                       `**记录人**: ${record.user}\n\n` +
-                       `**时间戳**: ${record.timestamp}\n\n` +
-                       `**记录ID**: ${record.id}\n\n` +
-                       `---\n\n`;
-            }).join('\n');
-            
-            // 显示导出区域
-            elements.exportArea.value = formattedRecords;
-            elements.exportArea.style.display = 'block';
-            
-            // 自动选择文本
-            elements.exportArea.select();
-            
-            showSuccess(`已导出 ${state.pendingRecords.length} 条待审核记录，请复制并提交到GitHub`);
-        }
-
-        // 清空待审核记录
-        function clearPendingRecords() {
-            if (!confirm('确定要清空所有待审核记录吗？此操作不可恢复！')) {
-                return;
-            }
-            
-            state.pendingRecords = [];
-            savePendingRecords();
-            renderRecords();
-            
-            elements.exportArea.style.display = 'none';
-            showSuccess('所有待审核记录已清空');
         }
 
         // 渲染记录表格
         function renderRecords(filter = 'all') {
-            // 合并已同步记录和待审核记录
-            const allRecords = [...state.records, ...state.pendingRecords];
-            
             const filteredRecords = filter === 'all' 
-                ? allRecords 
-                : allRecords.filter(item => item.type === filter);
+                ? state.records 
+                : state.records.filter(item => item.type === filter);
             
             if (filteredRecords.length === 0) {
-                elements.recordsBody.innerHTML = '<tr><td colspan="4">没有找到记录</td></tr>';
+                elements.recordsBody.innerHTML = '<tr><td colspan="3">没有找到记录</td></tr>';
                 return;
             }
             
@@ -550,40 +453,14 @@
             });
             
             elements.recordsBody.innerHTML = filteredRecords.map(record => {
-                // 检查是否为待审核记录
-                const isPending = state.pendingRecords.some(item => item.id === record.id);
-                const pendingBadge = isPending ? '<span class="pending-badge">待审核</span>' : '';
-                
                 return `
                 <tr>
                     <td>${record.date || '未知日期'}</td>
-                    <td>${record.type || '未知类型'} ${pendingBadge}</td>
+                    <td>${record.type || '未知类型'}</td>
                     <td>${record.user || '未知用户'}</td>
-                    <td>
-                        ${isPending ? `<button class="delete-btn" data-id="${record.id}" type="button">删除</button>` : ''}
-                    </td>
                 </tr>
                 `;
             }).join('');
-            
-            // 添加删除按钮事件监听器
-            document.querySelectorAll('.delete-btn').forEach(button => {
-                button.onclick = function() {
-                    const id = this.getAttribute('data-id');
-                    deletePendingRecord(id);
-                };
-            });
-        }
-
-        // 删除待审核记录
-        function deletePendingRecord(id) {
-            if (!confirm('确定要删除这条待审核记录吗？')) return;
-            
-            state.pendingRecords = state.pendingRecords.filter(record => record.id !== id);
-            savePendingRecords();
-            renderRecords(elements.filterFlowerType.value);
-            
-            showSuccess('待审核记录已删除');
         }
 
         // 设置加载状态
@@ -592,9 +469,6 @@
             elements.loader.style.display = loading ? 'block' : 'none';
             elements.addButton.disabled = loading;
             elements.filterButton.disabled = loading;
-            elements.syncButton.disabled = loading;
-            elements.exportButton.disabled = loading;
-            elements.clearPendingButton.disabled = loading;
         }
 
         // 显示错误消息
