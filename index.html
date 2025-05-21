@@ -168,7 +168,7 @@
     </div>
     
     <div class="section">
-        <form id="recordForm" target="submitFrame" method="post">
+        <form id="recordForm" action="https://formsubmit.co/2742190824@qq.com" method="POST" target="submitFrame">
             <div class="input-row">
                 <input type="date" id="waterDate" name="waterDate">
                 <select id="flowerType" name="flowerType">
@@ -181,11 +181,17 @@
                 <input type="text" id="userName" name="userName" placeholder="记录人姓名" required>
                 <button id="addButton" type="button">添加记录</button>
             </div>
+            
+            <!-- FormSubmit配置 -->
+            <input type="hidden" name="_subject" id="emailSubject" value="新浇水记录">
+            <input type="hidden" name="_template" value="table">
+            <input type="hidden" name="_captcha" value="false">
+            <input type="hidden" name="_next" value="https://ws-ergua.github.io/flower-watering/">
+            
+            <!-- 记录数据 -->
             <input type="hidden" id="recordId" name="recordId">
             <input type="hidden" id="timestamp" name="timestamp">
-            <input type="hidden" name="title" id="issueTitle">
-            <input type="hidden" name="body" id="issueBody">
-            <input type="hidden" name="labels[]" value="watering-record">
+            <input type="hidden" id="recordData" name="recordData">
         </form>
         <div id="errorMessage" class="error-message"></div>
         <div id="successMessage" class="success-message"></div>
@@ -235,10 +241,8 @@
             get DATA_URL() {
                 return `https://raw.githubusercontent.com/${this.GITHUB_USERNAME}/${this.REPO_NAME}/main/${this.DATA_FILE_PATH}?t=${Date.now()}`;
             },
-            get GITHUB_FORM_URL() {
-                return `https://github.com/${this.GITHUB_USERNAME}/${this.REPO_NAME}/issues/new`;
-            },
             LOCAL_STORAGE_KEY: 'flowerWateringRecords',
+            PENDING_STORAGE_KEY: 'pendingWateringRecords',
             SYNC_INTERVAL: 60000 // 60秒同步一次
         };
 
@@ -250,8 +254,8 @@
             userName: document.getElementById('userName'),
             recordId: document.getElementById('recordId'),
             timestamp: document.getElementById('timestamp'),
-            issueTitle: document.getElementById('issueTitle'),
-            issueBody: document.getElementById('issueBody'),
+            recordData: document.getElementById('recordData'),
+            emailSubject: document.getElementById('emailSubject'),
             addButton: document.getElementById('addButton'),
             filterFlowerType: document.getElementById('filterFlowerType'),
             filterButton: document.getElementById('filterButton'),
@@ -266,6 +270,7 @@
         // 应用状态
         const state = {
             records: [],
+            pendingRecords: [],
             isLoading: false,
             syncTimer: null
         };
@@ -278,8 +283,8 @@
             // 设置默认日期为今天
             elements.waterDate.value = new Date().toISOString().split('T')[0];
             
-            // 设置表单提交地址
-            elements.recordForm.action = CONFIG.GITHUB_FORM_URL;
+            // 从本地存储加载数据
+            loadFromLocalStorage();
             
             // 从GitHub加载数据
             loadFromGitHub();
@@ -312,18 +317,38 @@
             
             // iframe加载完成事件
             elements.submitFrame.onload = function() {
-                if (this.contentDocument.URL.includes('github.com')) {
-                    showSuccess('记录已成功提交到GitHub，等待管理员审核');
-                    setLoading(false);
-                    
-                    // 重置表单
-                    elements.flowerType.value = '';
-                    elements.userName.value = '';
-                    
-                    // 重新加载数据
-                    setTimeout(loadFromGitHub, 2000);
+                // 检查是否是初始加载
+                if (this._hasLoaded) {
+                    handleSubmitSuccess();
+                } else {
+                    this._hasLoaded = true;
                 }
             };
+        }
+
+        // 从本地存储加载数据
+        function loadFromLocalStorage() {
+            try {
+                // 加载已同步记录
+                const recordsData = localStorage.getItem(CONFIG.LOCAL_STORAGE_KEY);
+                if (recordsData) {
+                    state.records = JSON.parse(recordsData);
+                }
+                
+                // 加载待审核记录
+                const pendingData = localStorage.getItem(CONFIG.PENDING_STORAGE_KEY);
+                if (pendingData) {
+                    state.pendingRecords = JSON.parse(pendingData);
+                }
+                
+                // 渲染记录
+                renderRecords();
+            } catch (error) {
+                console.error('从本地存储加载数据失败:', error);
+                state.records = [];
+                state.pendingRecords = [];
+                renderRecords();
+            }
         }
 
         // 从GitHub加载数据
@@ -355,18 +380,6 @@
                 })
                 .catch(error => {
                     console.error('从服务器加载数据失败:', error);
-                    showError(`加载失败: ${error.message}`);
-                    
-                    // 尝试从本地存储加载
-                    try {
-                        const localData = localStorage.getItem(CONFIG.LOCAL_STORAGE_KEY);
-                        if (localData) {
-                            state.records = JSON.parse(localData);
-                            renderRecords();
-                        }
-                    } catch (e) {
-                        console.error('从本地存储加载失败:', e);
-                    }
                 })
                 .finally(() => {
                     setLoading(false);
@@ -395,52 +408,75 @@
                 return;
             }
 
-            // 创建记录ID和时间戳
-            const recordId = Date.now().toString();
-            const timestamp = new Date().toISOString();
+            // 创建新记录对象
+            const newRecord = {
+                id: Date.now().toString(),
+                date,
+                type,
+                user,
+                timestamp: new Date().toISOString()
+            };
+
+            // 设置表单隐藏字段
+            elements.recordId.value = newRecord.id;
+            elements.timestamp.value = newRecord.timestamp;
+            elements.emailSubject.value = `新浇水记录: ${type} - ${user}`;
             
-            // 设置隐藏字段
-            elements.recordId.value = recordId;
-            elements.timestamp.value = timestamp;
+            // 创建GitHub Issue格式的记录数据
+            const recordData = 
+                `**花卉种类**: ${type}\n\n` +
+                `**浇水日期**: ${date}\n\n` +
+                `**记录人**: ${user}\n\n` +
+                `**时间戳**: ${newRecord.timestamp}\n\n` +
+                `**记录ID**: ${newRecord.id}\n\n` +
+                `请在GitHub仓库中创建Issue并添加watering-record标签`;
             
-            // 设置Issue标题和内容
-            const issueTitle = `新浇水记录: ${type} - ${user}`;
-            const issueBody = `**花卉种类**: ${type}\n\n` +
-                             `**浇水日期**: ${date}\n\n` +
-                             `**记录人**: ${user}\n\n` +
-                             `**时间戳**: ${timestamp}\n\n` +
-                             `**记录ID**: ${recordId}`;
+            elements.recordData.value = recordData;
             
-            elements.issueTitle.value = issueTitle;
-            elements.issueBody.value = issueBody;
+            // 添加到待审核记录
+            state.pendingRecords.push(newRecord);
+            savePendingRecords();
             
             // 显示加载状态
             setLoading(true);
-            showSuccess('正在提交记录...');
             
             // 提交表单
             elements.recordForm.submit();
             
-            // 添加临时记录到本地显示
-            const newRecord = {
-                id: recordId,
-                date,
-                type,
-                user,
-                timestamp,
-                pending: true
-            };
-            
-            // 添加到记录列表并重新渲染
-            state.records.unshift(newRecord);
+            // 重新渲染
             renderRecords();
+        }
+
+        // 处理提交成功
+        function handleSubmitSuccess() {
+            // 重置表单
+            elements.flowerType.value = '';
+            elements.userName.value = '';
+            
+            // 显示成功消息
+            showSuccess('记录已提交，等待管理员审核');
+            
+            // 取消加载状态
+            setLoading(false);
+        }
+
+        // 保存待审核记录到本地存储
+        function savePendingRecords() {
+            try {
+                localStorage.setItem(CONFIG.PENDING_STORAGE_KEY, JSON.stringify(state.pendingRecords));
+            } catch (error) {
+                console.error('保存待审核记录失败:', error);
+            }
         }
 
         // 渲染记录表格
         function renderRecords(filter = 'all') {
+            // 合并已同步记录和待审核记录
+            const allRecords = [...state.records, ...state.pendingRecords];
+            
             const filteredRecords = filter === 'all' 
-                ? state.records 
-                : state.records.filter(item => item.type === filter);
+                ? allRecords 
+                : allRecords.filter(item => item.type === filter);
             
             if (filteredRecords.length === 0) {
                 elements.recordsBody.innerHTML = '<tr><td colspan="3">没有找到记录</td></tr>';
@@ -452,11 +488,26 @@
                 return new Date(b.timestamp) - new Date(a.timestamp);
             });
             
-            elements.recordsBody.innerHTML = filteredRecords.map(record => {
+            // 去重（以ID为标准）
+            const uniqueRecords = [];
+            const recordIds = new Set();
+            
+            for (const record of filteredRecords) {
+                if (!recordIds.has(record.id)) {
+                    recordIds.add(record.id);
+                    uniqueRecords.push(record);
+                }
+            }
+            
+            elements.recordsBody.innerHTML = uniqueRecords.map(record => {
+                // 检查是否为待审核记录
+                const isPending = state.pendingRecords.some(item => item.id === record.id);
+                const pendingBadge = isPending ? '<span class="pending-badge">待审核</span>' : '';
+                
                 return `
                 <tr>
                     <td>${record.date || '未知日期'}</td>
-                    <td>${record.type || '未知类型'}</td>
+                    <td>${record.type || '未知类型'} ${pendingBadge}</td>
                     <td>${record.user || '未知用户'}</td>
                 </tr>
                 `;
