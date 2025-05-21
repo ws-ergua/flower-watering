@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit: cover">
     <title>爱美特水务花卉浇水记录</title>
     <style>
         :root {
@@ -168,7 +168,7 @@
     </div>
     
     <div class="section">
-        <form id="recordForm" action="https://formsubmit.co/bb9d91e48723fc8a13c1185902f67684" method="POST" target="submitFrame">
+        <form id="recordForm" action="https://formsubmit.co/your-email@example.com" method="POST" target="submitFrame">
             <div class="input-row">
                 <input type="date" id="waterDate" name="waterDate">
                 <select id="flowerType" name="flowerType">
@@ -272,6 +272,7 @@
             records: [],
             pendingRecords: [],
             isLoading: false,
+            isSubmitting: false,
             syncTimer: null
         };
 
@@ -298,20 +299,51 @@
 
         // 设置事件监听器
         function setupEventListeners() {
-            // 添加记录按钮
-            elements.addButton.onclick = function() {
-                handleAddRecord();
+            // 添加记录按钮 - 优化响应速度
+            elements.addButton.onclick = function(e) {
+                e.preventDefault(); // 防止表单自动提交
+                
+                // 防止重复点击
+                if (state.isSubmitting) return;
+                
+                // 立即禁用按钮提供反馈
+                elements.addButton.disabled = true;
+                state.isSubmitting = true;
+                
+                // 异步处理提交
+                setTimeout(() => {
+                    handleAddRecord();
+                }, 10);
             };
             
-            // 筛选按钮
+            // 筛选按钮 - 优化响应速度
             elements.filterButton.onclick = function() {
-                renderRecords(elements.filterFlowerType.value);
+                // 立即禁用按钮提供反馈
+                elements.filterButton.disabled = true;
+                
+                // 异步处理筛选
+                setTimeout(() => {
+                    renderRecords(elements.filterFlowerType.value);
+                    elements.filterButton.disabled = false;
+                }, 10);
             };
             
             // 添加键盘支持 - 在输入框中按Enter键提交
             elements.userName.onkeypress = function(e) {
                 if (e.key === 'Enter') {
-                    handleAddRecord();
+                    e.preventDefault(); // 防止表单自动提交
+                    
+                    // 防止重复提交
+                    if (state.isSubmitting) return;
+                    
+                    // 立即禁用按钮提供反馈
+                    elements.addButton.disabled = true;
+                    state.isSubmitting = true;
+                    
+                    // 异步处理提交
+                    setTimeout(() => {
+                        handleAddRecord();
+                    }, 10);
                 }
             };
             
@@ -335,7 +367,7 @@
                     state.records = JSON.parse(recordsData);
                 }
                 
-                // 加载待审核记录
+                // 加载待审核记录（仅用于后台处理，不显示）
                 const pendingData = localStorage.getItem(CONFIG.PENDING_STORAGE_KEY);
                 if (pendingData) {
                     state.pendingRecords = JSON.parse(pendingData);
@@ -353,6 +385,12 @@
 
         // 从GitHub加载数据
         function loadFromGitHub() {
+            // 如果正在提交，延迟加载
+            if (state.isSubmitting) {
+                setTimeout(loadFromGitHub, 1000);
+                return;
+            }
+            
             setLoading(true);
             
             fetch(CONFIG.DATA_URL)
@@ -373,7 +411,7 @@
                         localStorage.setItem(CONFIG.LOCAL_STORAGE_KEY, JSON.stringify(state.records));
                         
                         // 重新渲染
-                        renderRecords();
+                        renderRecords(elements.filterFlowerType.value);
                     } else {
                         throw new Error('服务器返回的数据格式不正确');
                     }
@@ -395,16 +433,19 @@
 
             if (!date) {
                 showError('请选择浇水日期');
+                resetSubmitState();
                 return;
             }
 
             if (!type) {
                 showError('请选择花卉种类');
+                resetSubmitState();
                 return;
             }
 
             if (!user) {
                 showError('请输入记录人姓名');
+                resetSubmitState();
                 return;
             }
 
@@ -433,7 +474,7 @@
             
             elements.recordData.value = recordData;
             
-            // 添加到待审核记录
+            // 添加到待审核记录（仅用于后台处理，不显示）
             state.pendingRecords.push(newRecord);
             savePendingRecords();
             
@@ -442,9 +483,12 @@
             
             // 提交表单
             elements.recordForm.submit();
-            
-            // 重新渲染
-            renderRecords();
+        }
+
+        // 重置提交状态
+        function resetSubmitState() {
+            state.isSubmitting = false;
+            elements.addButton.disabled = false;
         }
 
         // 处理提交成功
@@ -455,6 +499,9 @@
             
             // 显示成功消息
             showSuccess('记录已提交，等待管理员审核');
+            
+            // 重置提交状态
+            resetSubmitState();
             
             // 取消加载状态
             setLoading(false);
@@ -469,14 +516,14 @@
             }
         }
 
-        // 渲染记录表格
+        // 渲染记录表格 - 只显示已同步记录，不显示待审核记录
         function renderRecords(filter = 'all') {
-            // 合并已同步记录和待审核记录
-            const allRecords = [...state.records, ...state.pendingRecords];
+            // 只使用已同步记录
+            const records = state.records;
             
             const filteredRecords = filter === 'all' 
-                ? allRecords 
-                : allRecords.filter(item => item.type === filter);
+                ? records 
+                : records.filter(item => item.type === filter);
             
             if (filteredRecords.length === 0) {
                 elements.recordsBody.innerHTML = '<tr><td colspan="3">没有找到记录</td></tr>';
@@ -485,7 +532,7 @@
             
             // 按日期排序（最新的在前）
             filteredRecords.sort((a, b) => {
-                return new Date(b.timestamp) - new Date(a.timestamp);
+                return new Date(b.timestamp || b.date) - new Date(a.timestamp || a.date);
             });
             
             // 去重（以ID为标准）
@@ -500,14 +547,10 @@
             }
             
             elements.recordsBody.innerHTML = uniqueRecords.map(record => {
-                // 检查是否为待审核记录
-                const isPending = state.pendingRecords.some(item => item.id === record.id);
-                const pendingBadge = isPending ? '<span class="pending-badge">待审核</span>' : '';
-                
                 return `
                 <tr>
                     <td>${record.date || '未知日期'}</td>
-                    <td>${record.type || '未知类型'} ${pendingBadge}</td>
+                    <td>${record.type || '未知类型'}</td>
                     <td>${record.user || '未知用户'}</td>
                 </tr>
                 `;
@@ -518,7 +561,11 @@
         function setLoading(loading) {
             state.isLoading = loading;
             elements.loader.style.display = loading ? 'block' : 'none';
-            elements.addButton.disabled = loading;
+            
+            // 只有在不是提交状态时才启用/禁用按钮
+            if (!state.isSubmitting) {
+                elements.addButton.disabled = loading;
+            }
             elements.filterButton.disabled = loading;
         }
 
