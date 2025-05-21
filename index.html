@@ -186,7 +186,7 @@
     </div>
     
     <div class="section">
-        <form id="recordForm" action="https://formsubmit.co/your-email@example.com" method="POST" target="submitFrame">
+        <form id="recordForm" action="https://formsubmit.co/bb9d91e48723fc8a13c1185902f67684" method="POST" target="submitFrame">
             <div class="input-row">
                 <input type="date" id="waterDate" name="waterDate">
                 <select id="flowerType" name="flowerType">
@@ -261,7 +261,8 @@
             LOCAL_STORAGE_KEY: 'flowerWateringRecords',
             PENDING_STORAGE_KEY: 'pendingWateringRecords',
             SYNC_INTERVAL: 300000, // 5分钟同步一次
-            CACHE_EXPIRY: 300000 // 缓存有效期5分钟
+            CACHE_EXPIRY: 300000, // 缓存有效期5分钟
+            SUBMISSION_TIMEOUT: 30000 // 提交超时时间30秒
         };
 
         // DOM元素引用
@@ -293,7 +294,8 @@
             isSubmitting: false,
             lastFetchTime: 0,
             syncTimer: null,
-            initialized: false
+            initialized: false,
+            submissionTimer: null
         };
 
         // 初始化应用
@@ -321,6 +323,18 @@
             
             // 标记初始化完成
             state.initialized = true;
+            
+            // 检查FormSubmit配置
+            checkFormSubmitConfig();
+        }
+
+        // 检查FormSubmit配置
+        function checkFormSubmitConfig() {
+            const formAction = elements.recordForm.getAttribute('action');
+            if (formAction === 'https://formsubmit.co/bb9d91e48723fc8a13c1185902f67684') {
+                console.warn('FormSubmit配置未更新，请将表单action属性更新为您的FormSubmit端点');
+                showError('表单配置未完成，请联系管理员更新FormSubmit配置');
+            }
         }
 
         // 显示骨架屏加载效果
@@ -383,6 +397,12 @@
                 // 检查是否是初始加载
                 if (this._hasLoaded) {
                     handleSubmitSuccess();
+                    
+                    // 清除提交超时计时器
+                    if (state.submissionTimer) {
+                        clearTimeout(state.submissionTimer);
+                        state.submissionTimer = null;
+                    }
                 } else {
                     this._hasLoaded = true;
                 }
@@ -530,8 +550,33 @@
             state.pendingRecords.push(newRecord);
             savePendingRecords();
             
+            // 设置提交超时处理
+            state.submissionTimer = setTimeout(() => {
+                // 如果超时未收到iframe的加载完成事件，认为提交失败
+                if (state.isSubmitting) {
+                    showError('提交超时，请检查网络连接后重试');
+                    resetSubmitState();
+                    
+                    // 记录提交失败
+                    console.error('表单提交超时');
+                }
+            }, CONFIG.SUBMISSION_TIMEOUT);
+            
             // 提交表单
-            elements.recordForm.submit();
+            try {
+                elements.recordForm.submit();
+                console.log('表单已提交');
+            } catch (error) {
+                console.error('表单提交失败:', error);
+                showError('提交失败，请稍后重试');
+                resetSubmitState();
+                
+                // 清除提交超时计时器
+                if (state.submissionTimer) {
+                    clearTimeout(state.submissionTimer);
+                    state.submissionTimer = null;
+                }
+            }
         }
 
         // 重置提交状态
@@ -542,6 +587,8 @@
 
         // 处理提交成功
         function handleSubmitSuccess() {
+            console.log('表单提交成功');
+            
             // 重置表单
             elements.flowerType.value = '';
             elements.userName.value = '';
