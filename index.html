@@ -410,8 +410,8 @@
                 },
                 LOCAL_STORAGE_KEY: 'flowerWateringRecords',
                 PENDING_STORAGE_KEY: 'pendingWateringRecords',
-                SYNC_INTERVAL: 30000, // 30秒同步一次
-                CACHE_EXPIRY: 30000, // 缓存有效期30秒
+                SYNC_INTERVAL: 20000, // 20秒同步一次
+                CACHE_EXPIRY: 20000, // 缓存有效期20秒
                 SUBMISSION_TIMEOUT: 30000 // 提交超时时间30秒
             };
 
@@ -500,6 +500,19 @@
                     } else {
                         this._hasLoaded = true;
                     }
+                });
+                
+                // 添加页面可见性变化监听，当页面重新变为可见时刷新数据
+                document.addEventListener('visibilitychange', function() {
+                    if (document.visibilityState === 'visible') {
+                        // 页面变为可见时，立即刷新数据
+                        loadFromGitHub();
+                    }
+                });
+                
+                // 添加页面焦点变化监听，当页面重新获得焦点时刷新数据
+                window.addEventListener('focus', function() {
+                    loadFromGitHub();
                 });
             }
             
@@ -686,10 +699,12 @@
                 const dataUrl = `https://raw.githubusercontent.com/${CONFIG.GITHUB_USERNAME}/${CONFIG.REPO_NAME}/main/${CONFIG.DATA_FILE_PATH}?t=${Date.now()}`;
                 
                 fetch(dataUrl, {
+                    method: 'GET',
                     cache: 'no-store', // 禁用缓存
                     headers: {
                         'Pragma': 'no-cache',
-                        'Cache-Control': 'no-cache'
+                        'Cache-Control': 'no-cache, no-store, must-revalidate',
+                        'Expires': '0'
                     }
                 })
                     .then(response => {
@@ -713,6 +728,8 @@
                             
                             // 重新渲染
                             renderRecords(elements.filterFlowerType.value);
+                            
+                            console.log('数据已成功加载，共 ' + data.length + ' 条记录');
                         } else {
                             throw new Error('服务器返回的数据格式不正确');
                         }
@@ -886,19 +903,6 @@
             
             // 立即执行预加载
             preloadResources();
-            
-            // 添加页面可见性变化监听，当页面重新变为可见时刷新数据
-            document.addEventListener('visibilitychange', function() {
-                if (document.visibilityState === 'visible') {
-                    // 页面变为可见时，立即刷新数据
-                    loadFromGitHub();
-                }
-            });
-            
-            // 添加页面焦点变化监听，当页面重新获得焦点时刷新数据
-            window.addEventListener('focus', function() {
-                loadFromGitHub();
-            });
         })();
     </script>
 </body>
