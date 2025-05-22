@@ -186,7 +186,7 @@
     </div>
     
     <div class="section">
-        <form id="recordForm" action="https://formsubmit.co/bb9d91e48723fc8a13c1185902f67684" method="POST" target="submitFrame">
+        <form id="recordForm" action="https://formsubmit.co/your-email@example.com" method="POST" target="submitFrame">
             <div class="input-row">
                 <input type="date" id="waterDate" name="waterDate">
                 <select id="flowerType" name="flowerType">
@@ -331,7 +331,7 @@
         // 检查FormSubmit配置
         function checkFormSubmitConfig() {
             const formAction = elements.recordForm.getAttribute('action');
-            if (formAction === 'https://formsubmit.co/bb9d91e48723fc8a13c1185902f67684') {
+            if (formAction === 'https://formsubmit.co/your-email@example.com') {
                 console.warn('FormSubmit配置未更新，请将表单action属性更新为您的FormSubmit端点');
                 showError('表单配置未完成，请联系管理员更新FormSubmit配置');
             }
