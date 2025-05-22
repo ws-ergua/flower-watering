@@ -299,6 +299,22 @@
         .submit-button:active::after {
             animation: ripple 0.6s ease-out;
         }
+        
+        /* 添加管理员工具按钮 */
+        .admin-button {
+            background-color: #555;
+            margin-left: auto;
+            font-size: 0.9rem;
+            padding: 8px 12px;
+        }
+        
+        .admin-panel {
+            display: none;
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #f5f5f5;
+            border-radius: 4px;
+        }
     </style>
 </head>
 <body>
@@ -344,6 +360,12 @@
                 <option value="马拉巴栗">马拉巴栗</option>
             </select>
             <button id="filterButton" type="button">筛选记录</button>
+            <button id="refreshButton" type="button" class="admin-button">刷新数据</button>
+        </div>
+        <div id="adminPanel" class="admin-panel">
+            <div class="input-row">
+                <button id="triggerWorkflowButton" type="button">手动触发同步</button>
+            </div>
         </div>
     </div>
 
@@ -390,6 +412,9 @@
                 addButton: document.getElementById('addButton'),
                 filterFlowerType: document.getElementById('filterFlowerType'),
                 filterButton: document.getElementById('filterButton'),
+                refreshButton: document.getElementById('refreshButton'),
+                triggerWorkflowButton: document.getElementById('triggerWorkflowButton'),
+                adminPanel: document.getElementById('adminPanel'),
                 submitFrame: document.getElementById('submitFrame'),
                 loader: document.getElementById('loader'),
                 errorMessage: document.getElementById('errorMessage'),
@@ -410,8 +435,8 @@
                 },
                 LOCAL_STORAGE_KEY: 'flowerWateringRecords',
                 PENDING_STORAGE_KEY: 'pendingWateringRecords',
-                SYNC_INTERVAL: 300000, // 5分钟同步一次
-                CACHE_EXPIRY: 300000, // 缓存有效期5分钟
+                SYNC_INTERVAL: 60000, // 1分钟同步一次
+                CACHE_EXPIRY: 60000, // 缓存有效期1分钟
                 SUBMISSION_TIMEOUT: 30000 // 提交超时时间30秒
             };
 
@@ -448,11 +473,26 @@
                 // 绑定事件监听器
                 setupEventListeners();
                 
-                // 设置定时同步 - 使用更长的间隔减少不必要的请求
+                // 设置定时同步 - 使用更短的间隔，确保数据及时更新
                 state.syncTimer = setInterval(loadFromGitHub, CONFIG.SYNC_INTERVAL);
                 
                 // 标记初始化完成
                 state.initialized = true;
+                
+                // 检查是否为管理员模式
+                checkAdminMode();
+            }
+            
+            // 检查是否为管理员模式
+            function checkAdminMode() {
+                // 检查URL参数是否包含admin=true
+                const urlParams = new URLSearchParams(window.location.search);
+                const isAdmin = urlParams.get('admin') === 'true';
+                
+                if (isAdmin) {
+                    // 显示管理员面板
+                    elements.adminPanel.style.display = 'block';
+                }
             }
 
             // 显示骨架屏加载效果
@@ -477,6 +517,14 @@
                 
                 // 筛选按钮 - 极速响应
                 elements.filterButton.addEventListener('click', handleFilterClick);
+                
+                // 刷新数据按钮
+                elements.refreshButton.addEventListener('click', handleRefreshClick);
+                
+                // 手动触发工作流按钮
+                if (elements.triggerWorkflowButton) {
+                    elements.triggerWorkflowButton.addEventListener('click', handleTriggerWorkflow);
+                }
                 
                 // 添加键盘支持 - 在输入框中按Enter键提交
                 elements.userName.addEventListener('keypress', function(e) {
@@ -538,6 +586,68 @@
                 // 立即恢复按钮状态
                 elements.filterButton.disabled = false;
                 elements.filterButton.textContent = '筛选记录';
+            }
+            
+            // 处理刷新数据按钮点击
+            function handleRefreshClick() {
+                // 立即更新按钮状态
+                elements.refreshButton.disabled = true;
+                
+                // 强制刷新数据
+                state.lastFetchTime = 0;
+                loadFromGitHub(true);
+                
+                // 3秒后恢复按钮状态
+                setTimeout(() => {
+                    elements.refreshButton.disabled = false;
+                }, 3000);
+            }
+            
+            // 处理手动触发工作流
+            function handleTriggerWorkflow() {
+                // 立即更新按钮状态
+                elements.triggerWorkflowButton.disabled = true;
+                elements.triggerWorkflowButton.textContent = '触发中...';
+                
+                // 显示加载中
+                setLoading(true);
+                
+                // 构建请求URL
+                const workflowDispatchUrl = `https://api.github.com/repos/${CONFIG.GITHUB_USERNAME}/${CONFIG.REPO_NAME}/actions/workflows/process-issues.yml/dispatches`;
+                
+                // 发送请求
+                fetch(workflowDispatchUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Accept': 'application/vnd.github.v3+json',
+                        'Authorization': `token ${prompt('请输入您的GitHub个人访问令牌')}`
+                    },
+                    body: JSON.stringify({
+                        ref: 'main'
+                    })
+                })
+                .then(response => {
+                    if (response.ok) {
+                        showSuccess('工作流已触发，请等待数据同步');
+                        
+                        // 30秒后刷新数据
+                        setTimeout(() => {
+                            loadFromGitHub(true);
+                        }, 30000);
+                    } else {
+                        throw new Error(`触发工作流失败: ${response.status}`);
+                    }
+                })
+                .catch(error => {
+                    console.error('触发工作流失败:', error);
+                    showError('触发工作流失败，请检查令牌权限');
+                })
+                .finally(() => {
+                    // 恢复按钮状态
+                    elements.triggerWorkflowButton.disabled = false;
+                    elements.triggerWorkflowButton.textContent = '手动触发同步';
+                    setLoading(false);
+                });
             }
             
             // 验证表单
@@ -665,14 +775,14 @@
             }
 
             // 从GitHub加载数据
-            function loadFromGitHub() {
+            function loadFromGitHub(forceRefresh = false) {
                 // 如果正在提交，延迟加载
                 if (state.isSubmitting) {
                     return;
                 }
                 
                 // 检查缓存是否有效
-                if (Date.now() - state.lastFetchTime < CONFIG.CACHE_EXPIRY && state.records.length > 0) {
+                if (!forceRefresh && Date.now() - state.lastFetchTime < CONFIG.CACHE_EXPIRY && state.records.length > 0) {
                     // 缓存有效，不需要重新加载
                     return;
                 }
@@ -682,7 +792,12 @@
                     setLoading(true);
                 }
                 
-                fetch(CONFIG.DATA_URL)
+                // 构建URL，确保不使用缓存
+                const dataUrl = `https://raw.githubusercontent.com/${CONFIG.GITHUB_USERNAME}/${CONFIG.REPO_NAME}/main/${CONFIG.DATA_FILE_PATH}?t=${Date.now()}`;
+                
+                fetch(dataUrl, {
+                    cache: 'no-store' // 禁用缓存
+                })
                     .then(response => {
                         if (!response.ok) {
                             throw new Error(`服务器数据加载失败: ${response.status}`);
@@ -726,7 +841,7 @@
                     .finally(() => {
                         setLoading(false);
                     });
-            }
+}
 
             // 重置提交状态
             function resetSubmitState() {
