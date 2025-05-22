@@ -267,6 +267,8 @@
         .submit-button {
             position: relative;
             overflow: hidden;
+            will-change: transform, background-color;
+            touch-action: manipulation;
         }
         
         .submit-button::after {
@@ -375,24 +377,8 @@
     <script>
         // 立即执行函数，减少全局变量污染
         (function() {
-            // 配置部分
-            const CONFIG = {
-                GITHUB_USERNAME: 'ws-ergua',
-                REPO_NAME: 'flower-watering',
-                DATA_FILE_PATH: 'data/records.json',
-                get DATA_URL() {
-                    // 添加缓存破坏参数
-                    return `https://raw.githubusercontent.com/${this.GITHUB_USERNAME}/${this.REPO_NAME}/main/${this.DATA_FILE_PATH}?t=${Date.now()}`;
-                },
-                LOCAL_STORAGE_KEY: 'flowerWateringRecords',
-                PENDING_STORAGE_KEY: 'pendingWateringRecords',
-                SYNC_INTERVAL: 300000, // 5分钟同步一次
-                CACHE_EXPIRY: 300000, // 缓存有效期5分钟
-                SUBMISSION_TIMEOUT: 30000 // 提交超时时间30秒
-            };
-
-            // DOM元素引用 - 使用函数延迟获取，避免DOM未加载完成的问题
-            const getElements = () => ({
+            // DOM元素缓存
+            const elements = {
                 recordForm: document.getElementById('recordForm'),
                 waterDate: document.getElementById('waterDate'),
                 flowerType: document.getElementById('flowerType'),
@@ -411,7 +397,23 @@
                 recordsBody: document.getElementById('recordsBody'),
                 currentYear: document.getElementById('currentYear'),
                 skeletonContainer: document.getElementById('skeletonContainer')
-            });
+            };
+
+            // 配置部分
+            const CONFIG = {
+                GITHUB_USERNAME: 'ws-ergua',
+                REPO_NAME: 'flower-watering',
+                DATA_FILE_PATH: 'data/records.json',
+                get DATA_URL() {
+                    // 添加缓存破坏参数
+                    return `https://raw.githubusercontent.com/${this.GITHUB_USERNAME}/${this.REPO_NAME}/main/${this.DATA_FILE_PATH}?t=${Date.now()}`;
+                },
+                LOCAL_STORAGE_KEY: 'flowerWateringRecords',
+                PENDING_STORAGE_KEY: 'pendingWateringRecords',
+                SYNC_INTERVAL: 300000, // 5分钟同步一次
+                CACHE_EXPIRY: 300000, // 缓存有效期5分钟
+                SUBMISSION_TIMEOUT: 30000 // 提交超时时间30秒
+            };
 
             // 应用状态
             const state = {
@@ -428,8 +430,6 @@
 
             // 初始化应用
             function initApp() {
-                const elements = getElements();
-                
                 // 设置当前年份
                 elements.currentYear.textContent = new Date().getFullYear();
                 
@@ -457,7 +457,6 @@
 
             // 显示骨架屏加载效果
             function showSkeletonLoader() {
-                const elements = getElements();
                 const skeletonHTML = Array(5).fill(0).map(() => 
                     `<div class="skeleton-row"></div>`
                 ).join('');
@@ -471,67 +470,19 @@
                 elements.recordsBody.innerHTML = '';
             }
 
-            // 设置事件监听器
+            // 设置事件监听器 - 优化按钮响应速度
             function setupEventListeners() {
-                const elements = getElements();
+                // 添加记录按钮 - 极速响应
+                elements.addButton.addEventListener('click', handleButtonClick);
                 
-                // 添加记录按钮 - 优化响应速度
-                elements.addButton.addEventListener('click', function(e) {
-                    e.preventDefault(); // 防止表单自动提交
-                    
-                    // 防止重复点击
-                    if (state.isSubmitting) return;
-                    
-                    // 立即禁用按钮提供反馈
-                    this.disabled = true;
-                    this.textContent = '提交中...';
-                    state.isSubmitting = true;
-                    
-                    // 立即显示成功消息，不等待iframe加载
-                    if (validateForm()) {
-                        showSuccess('记录已提交，等待管理员审核');
-                        // 立即处理提交
-                        handleAddRecord();
-                    } else {
-                        // 如果验证失败，重置按钮状态
-                        resetSubmitState();
-                    }
-                });
-                
-                // 筛选按钮 - 优化响应速度
-                elements.filterButton.addEventListener('click', function() {
-                    // 立即禁用按钮提供反馈
-                    this.disabled = true;
-                    this.textContent = '筛选中...';
-                    
-                    // 立即处理筛选
-                    renderRecords(elements.filterFlowerType.value);
-                    this.disabled = false;
-                    this.textContent = '筛选记录';
-                });
+                // 筛选按钮 - 极速响应
+                elements.filterButton.addEventListener('click', handleFilterClick);
                 
                 // 添加键盘支持 - 在输入框中按Enter键提交
                 elements.userName.addEventListener('keypress', function(e) {
                     if (e.key === 'Enter') {
                         e.preventDefault(); // 防止表单自动提交
-                        
-                        // 防止重复提交
-                        if (state.isSubmitting) return;
-                        
-                        // 立即禁用按钮提供反馈
-                        elements.addButton.disabled = true;
-                        elements.addButton.textContent = '提交中...';
-                        state.isSubmitting = true;
-                        
-                        // 立即显示成功消息，不等待iframe加载
-                        if (validateForm()) {
-                            showSuccess('记录已提交，等待管理员审核');
-                            // 立即处理提交
-                            handleAddRecord();
-                        } else {
-                            // 如果验证失败，重置按钮状态
-                            resetSubmitState();
-                        }
+                        handleButtonClick();
                     }
                 });
                 
@@ -550,6 +501,137 @@
                         this._hasLoaded = true;
                     }
                 });
+            }
+            
+            // 处理添加按钮点击 - 极速响应
+            function handleButtonClick() {
+                // 防止重复点击
+                if (state.isSubmitting) return;
+                
+                // 立即验证表单
+                if (!validateForm()) return;
+                
+                // 立即更新按钮状态
+                elements.addButton.disabled = true;
+                elements.addButton.textContent = '提交中...';
+                state.isSubmitting = true;
+                
+                // 立即显示成功消息
+                showSuccess('记录已提交，等待管理员审核');
+                
+                // 立即准备表单数据
+                prepareFormData();
+                
+                // 立即提交表单
+                submitForm();
+            }
+            
+            // 处理筛选按钮点击 - 极速响应
+            function handleFilterClick() {
+                // 立即更新按钮状态
+                elements.filterButton.disabled = true;
+                elements.filterButton.textContent = '筛选中...';
+                
+                // 立即渲染记录
+                renderRecords(elements.filterFlowerType.value);
+                
+                // 立即恢复按钮状态
+                elements.filterButton.disabled = false;
+                elements.filterButton.textContent = '筛选记录';
+            }
+            
+            // 验证表单
+            function validateForm() {
+                const date = elements.waterDate.value;
+                const type = elements.flowerType.value;
+                const user = elements.userName.value.trim();
+
+                if (!date) {
+                    showError('请选择浇水日期');
+                    return false;
+                }
+
+                if (!type) {
+                    showError('请选择花卉种类');
+                    return false;
+                }
+
+                if (!user) {
+                    showError('请输入记录人姓名');
+                    return false;
+                }
+                
+                return true;
+            }
+            
+            // 准备表单数据
+            function prepareFormData() {
+                const date = elements.waterDate.value;
+                const type = elements.flowerType.value;
+                const user = elements.userName.value.trim();
+                
+                // 创建新记录对象
+                const newRecord = {
+                    id: Date.now().toString(),
+                    date,
+                    type,
+                    user,
+                    timestamp: new Date().toISOString()
+                };
+
+                // 设置表单隐藏字段
+                elements.recordId.value = newRecord.id;
+                elements.timestamp.value = newRecord.timestamp;
+                elements.emailSubject.value = `新浇水记录: ${type} - ${user}`;
+                
+                // 创建GitHub Issue格式的记录数据
+                const recordData = 
+                    `**花卉种类**: ${type}\n\n` +
+                    `**浇水日期**: ${date}\n\n` +
+                    `**记录人**: ${user}\n\n` +
+                    `**时间戳**: ${newRecord.timestamp}\n\n` +
+                    `**记录ID**: ${newRecord.id}\n\n` +
+                    `请在GitHub仓库中创建Issue并添加watering-record标签`;
+                
+                elements.recordData.value = recordData;
+                
+                // 添加到待审核记录（仅用于后台处理，不显示）
+                state.pendingRecords.push(newRecord);
+                savePendingRecords();
+                
+                // 重置表单字段，提供更好的用户体验
+                elements.flowerType.value = '';
+                elements.userName.value = '';
+            }
+            
+            // 提交表单
+            function submitForm() {
+                // 设置提交超时处理
+                state.submissionTimer = setTimeout(() => {
+                    // 如果超时未收到iframe的加载完成事件，认为提交失败
+                    if (state.isSubmitting) {
+                        resetSubmitState();
+                        
+                        // 记录提交失败
+                        console.error('表单提交超时');
+                    }
+                }, CONFIG.SUBMISSION_TIMEOUT);
+                
+                // 提交表单
+                try {
+                    elements.recordForm.submit();
+                    console.log('表单已提交');
+                } catch (error) {
+                    console.error('表单提交失败:', error);
+                    showError('提交失败，请稍后重试');
+                    resetSubmitState();
+                    
+                    // 清除提交超时计时器
+                    if (state.submissionTimer) {
+                        clearTimeout(state.submissionTimer);
+                        state.submissionTimer = null;
+                    }
+                }
             }
 
             // 从本地存储加载数据
@@ -584,8 +666,6 @@
 
             // 从GitHub加载数据
             function loadFromGitHub() {
-                const elements = getElements();
-                
                 // 如果正在提交，延迟加载
                 if (state.isSubmitting) {
                     return;
@@ -647,105 +727,9 @@
                         setLoading(false);
                     });
             }
-            
-            // 验证表单
-            function validateForm() {
-                const elements = getElements();
-                const date = elements.waterDate.value;
-                const type = elements.flowerType.value;
-                const user = elements.userName.value.trim();
-
-                if (!date) {
-                    showError('请选择浇水日期');
-                    return false;
-                }
-
-                if (!type) {
-                    showError('请选择花卉种类');
-                    return false;
-                }
-
-                if (!user) {
-                    showError('请输入记录人姓名');
-                    return false;
-                }
-                
-                return true;
-            }
-
-            // 处理添加记录
-            function handleAddRecord() {
-                const elements = getElements();
-                
-                // 验证已在点击事件中完成，这里直接获取值
-                const date = elements.waterDate.value;
-                const type = elements.flowerType.value;
-                const user = elements.userName.value.trim();
-
-                // 创建新记录对象
-                const newRecord = {
-                    id: Date.now().toString(),
-                    date,
-                    type,
-                    user,
-                    timestamp: new Date().toISOString()
-                };
-
-                // 设置表单隐藏字段
-                elements.recordId.value = newRecord.id;
-                elements.timestamp.value = newRecord.timestamp;
-                elements.emailSubject.value = `新浇水记录: ${type} - ${user}`;
-                
-                // 创建GitHub Issue格式的记录数据
-                const recordData = 
-                    `**花卉种类**: ${type}\n\n` +
-                    `**浇水日期**: ${date}\n\n` +
-                    `**记录人**: ${user}\n\n` +
-                    `**时间戳**: ${newRecord.timestamp}\n\n` +
-                    `**记录ID**: ${newRecord.id}\n\n` +
-                    `请在GitHub仓库中创建Issue并添加watering-record标签`;
-                
-                elements.recordData.value = recordData;
-                
-                // 添加到待审核记录（仅用于后台处理，不显示）
-                state.pendingRecords.push(newRecord);
-                savePendingRecords();
-                
-                // 设置提交超时处理
-                state.submissionTimer = setTimeout(() => {
-                    // 如果超时未收到iframe的加载完成事件，认为提交失败
-                    if (state.isSubmitting) {
-                        resetSubmitState();
-                        
-                        // 记录提交失败
-                        console.error('表单提交超时');
-                    }
-                }, CONFIG.SUBMISSION_TIMEOUT);
-                
-                // 提交表单
-                try {
-                    elements.recordForm.submit();
-                    console.log('表单已提交');
-                    
-                    // 重置表单字段，提供更好的用户体验
-                    elements.flowerType.value = '';
-                    elements.userName.value = '';
-                } catch (error) {
-                    console.error('表单提交失败:', error);
-                    showError('提交失败，请稍后重试');
-                    resetSubmitState();
-                    
-                    // 清除提交超时计时器
-                    if (state.submissionTimer) {
-                        clearTimeout(state.submissionTimer);
-                        state.submissionTimer = null;
-                    }
-                }
-            }
 
             // 重置提交状态
             function resetSubmitState() {
-                const elements = getElements();
                 state.isSubmitting = false;
                 elements.addButton.disabled = false;
                 elements.addButton.textContent = '添加记录';
@@ -770,8 +754,6 @@
 
             // 渲染记录表格 - 只显示已同步记录，不显示待审核记录
             function renderRecords(filter = 'all') {
-                const elements = getElements();
-                
                 // 隐藏骨架屏
                 if (elements.skeletonContainer) {
                     elements.skeletonContainer.style.display = 'none';
@@ -821,7 +803,6 @@
 
             // 设置加载状态
             function setLoading(loading) {
-                const elements = getElements();
                 state.isLoading = loading;
                 elements.loader.style.display = loading ? 'block' : 'none';
                 
@@ -839,7 +820,6 @@
 
             // 显示错误消息
             function showError(message) {
-                const elements = getElements();
                 if (!message) {
                     elements.errorMessage.style.display = 'none';
                     return;
@@ -857,7 +837,6 @@
 
             // 显示成功消息
             function showSuccess(message) {
-                const elements = getElements();
                 if (!message) {
                     elements.successMessage.style.display = 'none';
                     return;
