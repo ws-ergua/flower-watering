@@ -80,7 +80,7 @@ jobs:
             
             const options = {
               hostname: 'api.github.com',
-              path: `/repos/${repo}/issues?state=open&labels=watering-record&per_page=100`,
+              path: `/repos/${repo}/issues?state=all&labels=watering-record&per_page=100`,
               method: 'GET',
               headers: {
                 'User-Agent': 'GitHub-Action-Script',
@@ -102,7 +102,7 @@ jobs:
           // 从Issue内容中提取记录数据
           function extractRecordFromIssue(issue) {
             const record = {
-              id: Date.now().toString() + '-' + issue.number,
+              id: issue.number.toString(),
               issue_number: issue.number,
               issue_title: issue.title,
               issue_url: issue.html_url,
