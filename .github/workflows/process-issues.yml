@@ -15,8 +15,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
       
       - name: Setup Node.js
         uses: actions/setup-node@v3
@@ -125,7 +123,7 @@ jobs:
               if (timestampMatch) record.timestamp = timestampMatch[1].trim();
               
               const idMatch = issue.body.match(/\*\*记录ID\*\*:\s*(.*?)(?:\r?\n|$)/);
-              if (idMatch) record.id = idMatch[1].trim();
+              if (idMatch && idMatch[1].trim()) record.id = idMatch[1].trim();
             }
             
             // 从标题中提取信息（如果内容中没有）
@@ -190,4 +188,5 @@ jobs:
           git config --global user.name 'GitHub Actions'
           git config --global user.email 'actions@github.com'
           git add data/records.json
-          git diff --staged --quiet || (git commit -m "Update records from issues [skip ci]" && git push)
+          git commit -m "Update records from issues [skip ci]" || echo "No changes to commit"
+          git push || echo "No changes to push"
