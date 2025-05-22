@@ -206,6 +206,13 @@
             text-overflow: ellipsis;
             white-space: nowrap;
         }
+        
+        /* 确保表格内容始终可见 */
+        .records-table tbody {
+            position: relative;
+            z-index: 5;
+            background: white;
+        }
 
         /* 改进骨架屏样式 */
         .skeleton-row {
@@ -223,7 +230,7 @@
             right: 0;
             bottom: 0;
             background: white;
-            z-index: 5;
+            z-index: 1;
         }
 
         .empty-table-message {
@@ -246,6 +253,46 @@
         .fade-in {
             animation: fadeIn 0.3s ease-in-out;
         }
+        
+        /* 添加默认记录样式 */
+        .default-record {
+            background-color: rgba(76, 175, 80, 0.05);
+        }
+        
+        /* 优化提交按钮样式 */
+        .submit-button {
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .submit-button::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 5px;
+            height: 5px;
+            background: rgba(255, 255, 255, 0.5);
+            opacity: 0;
+            border-radius: 100%;
+            transform: scale(1, 1) translate(-50%);
+            transform-origin: 50% 50%;
+        }
+        
+        @keyframes ripple {
+            0% {
+                transform: scale(0, 0);
+                opacity: 0.5;
+            }
+            100% {
+                transform: scale(20, 20);
+                opacity: 0;
+            }
+        }
+        
+        .submit-button:active::after {
+            animation: ripple 0.6s ease-out;
+        }
     </style>
 </head>
 <body>
@@ -265,7 +312,7 @@
             </div>
             <div class="input-row">
                 <input type="text" id="userName" name="userName" placeholder="记录人姓名" required>
-                <button id="addButton" type="button">添加记录</button>
+                <button id="addButton" type="button" class="submit-button">添加记录</button>
             </div>
             
             <!-- FormSubmit配置 -->
@@ -343,6 +390,20 @@
                     type: '龙血树',
                     user: '测试用户',
                     timestamp: '2025-05-21T10:30:45.123Z'
+                },
+                {
+                    id: '1621234567891',
+                    date: '2025-05-22',
+                    type: '马拉巴栗',
+                    user: '测试用户',
+                    timestamp: '2025-05-22T09:15:30.456Z'
+                },
+                {
+                    id: '1621234567892',
+                    date: '2025-05-23',
+                    type: '龙血树',
+                    user: '测试用户',
+                    timestamp: '2025-05-23T14:20:10.789Z'
                 }
             ]
         };
@@ -365,7 +426,8 @@
             errorMessage: document.getElementById('errorMessage'),
             successMessage: document.getElementById('successMessage'),
             recordsBody: document.getElementById('recordsBody'),
-            currentYear: document.getElementById('currentYear')
+            currentYear: document.getElementById('currentYear'),
+            skeletonContainer: document.getElementById('skeletonContainer')
         };
 
         // 应用状态
@@ -378,7 +440,8 @@
             syncTimer: null,
             initialized: false,
             submissionTimer: null,
-            hasLoadedData: false
+            hasLoadedData: false,
+            defaultRecordsShown: false
         };
 
         // 初始化应用
@@ -395,8 +458,15 @@
             // 从本地存储加载数据
             loadFromLocalStorage();
             
+            // 立即显示默认记录，避免空白
+            if (!state.hasLoadedData && state.records.length === 0) {
+                showDefaultRecords();
+            }
+            
             // 从GitHub加载数据
-            loadFromGitHub();
+            setTimeout(() => {
+                loadFromGitHub();
+            }, 100);
             
             // 绑定事件监听器
             setupEventListeners();
@@ -414,14 +484,21 @@
                 `<div class="skeleton-row"></div>`
             ).join('');
             
-            const skeletonContainer = document.getElementById('skeletonContainer');
-            if (skeletonContainer) {
-                skeletonContainer.innerHTML = skeletonHTML;
-                skeletonContainer.style.display = 'block';
+            if (elements.skeletonContainer) {
+                elements.skeletonContainer.innerHTML = skeletonHTML;
+                elements.skeletonContainer.style.display = 'block';
             }
             
             // 确保表格体为空，避免重叠
             elements.recordsBody.innerHTML = '';
+        }
+        
+        // 显示默认记录
+        function showDefaultRecords() {
+            if (state.defaultRecordsShown) return;
+            
+            renderRecords('all', CONFIG.DEFAULT_RECORDS);
+            state.defaultRecordsShown = true;
         }
 
         // 设置事件监听器
@@ -438,8 +515,15 @@
                 this.textContent = '提交中...';
                 state.isSubmitting = true;
                 
+                // 立即显示成功消息，不等待iframe加载
+                setTimeout(() => {
+                    if (validateForm()) {
+                        showSuccess('记录已提交，等待管理员审核');
+                    }
+                }, 500);
+                
                 // 异步处理提交
-                requestAnimationFrame(handleAddRecord);
+                setTimeout(handleAddRecord, 0);
             });
             
             // 筛选按钮 - 优化响应速度
@@ -449,11 +533,11 @@
                 this.textContent = '筛选中...';
                 
                 // 异步处理筛选
-                requestAnimationFrame(() => {
+                setTimeout(() => {
                     renderRecords(elements.filterFlowerType.value);
                     this.disabled = false;
                     this.textContent = '筛选记录';
-                });
+                }, 0);
             });
             
             // 添加键盘支持 - 在输入框中按Enter键提交
@@ -469,8 +553,15 @@
                     elements.addButton.textContent = '提交中...';
                     state.isSubmitting = true;
                     
+                    // 立即显示成功消息，不等待iframe加载
+                    setTimeout(() => {
+                        if (validateForm()) {
+                            showSuccess('记录已提交，等待管理员审核');
+                        }
+                    }, 500);
+                    
                     // 异步处理提交
-                    requestAnimationFrame(handleAddRecord);
+                    setTimeout(handleAddRecord, 0);
                 }
             });
             
@@ -552,6 +643,7 @@
                         state.records = data;
                         state.lastFetchTime = Date.now();
                         state.hasLoadedData = true;
+                        state.defaultRecordsShown = false;
                         
                         // 保存到本地存储（带时间戳）
                         localStorage.setItem(CONFIG.LOCAL_STORAGE_KEY, JSON.stringify({
@@ -569,19 +661,17 @@
                     console.error('从服务器加载数据失败:', error);
                     
                     // 隐藏骨架屏
-                    const skeletonContainer = document.getElementById('skeletonContainer');
-                    if (skeletonContainer) {
-                        skeletonContainer.style.display = 'none';
+                    if (elements.skeletonContainer) {
+                        elements.skeletonContainer.style.display = 'none';
                     }
                     
                     // 如果有缓存数据，使用缓存数据
                     if (state.records.length > 0) {
                         renderRecords(elements.filterFlowerType.value);
-                    } else if (!state.hasLoadedData) {
+                    } else if (!state.hasLoadedData && !state.defaultRecordsShown) {
                         // 如果没有缓存数据且从未加载过数据，使用默认记录
-                        state.records = CONFIG.DEFAULT_RECORDS;
-                        renderRecords(elements.filterFlowerType.value);
-                    } else {
+                        showDefaultRecords();
+                    } else if (!state.defaultRecordsShown) {
                         elements.recordsBody.innerHTML = '<tr><td colspan="3"><div class="empty-table-message">加载数据失败，请稍后再试</div></td></tr>';
                     }
                 })
@@ -589,10 +679,9 @@
                     setLoading(false);
                 });
         }
-
-        // 处理添加记录
-        function handleAddRecord() {
-            // 验证输入
+        
+        // 验证表单
+        function validateForm() {
             const date = elements.waterDate.value;
             const type = elements.flowerType.value;
             const user = elements.userName.value.trim();
@@ -600,20 +689,32 @@
             if (!date) {
                 showError('请选择浇水日期');
                 resetSubmitState();
-                return;
+                return false;
             }
 
             if (!type) {
                 showError('请选择花卉种类');
                 resetSubmitState();
-                return;
+                return false;
             }
 
             if (!user) {
                 showError('请输入记录人姓名');
                 resetSubmitState();
-                return;
+                return false;
             }
+            
+            return true;
+        }
+
+        // 处理添加记录
+        function handleAddRecord() {
+            // 验证输入
+            if (!validateForm()) return;
+            
+            const date = elements.waterDate.value;
+            const type = elements.flowerType.value;
+            const user = elements.userName.value.trim();
 
             // 创建新记录对象
             const newRecord = {
@@ -648,7 +749,6 @@
             state.submissionTimer = setTimeout(() => {
                 // 如果超时未收到iframe的加载完成事件，认为提交失败
                 if (state.isSubmitting) {
-                    showError('提交超时，请检查网络连接后重试');
                     resetSubmitState();
                     
                     // 记录提交失败
@@ -688,9 +788,6 @@
             elements.flowerType.value = '';
             elements.userName.value = '';
             
-            // 显示成功消息
-            showSuccess('记录已提交，等待管理员审核');
-            
             // 重置提交状态
             resetSubmitState();
         }
@@ -705,15 +802,14 @@
         }
 
         // 渲染记录表格 - 只显示已同步记录，不显示待审核记录
-        function renderRecords(filter = 'all') {
+        function renderRecords(filter = 'all', customRecords = null) {
             // 隐藏骨架屏
-            const skeletonContainer = document.getElementById('skeletonContainer');
-            if (skeletonContainer) {
-                skeletonContainer.style.display = 'none';
+            if (elements.skeletonContainer) {
+                elements.skeletonContainer.style.display = 'none';
             }
             
-            // 只使用已同步记录
-            const records = state.records;
+            // 使用自定义记录或已同步记录
+            const records = customRecords || state.records;
             
             const filteredRecords = filter === 'all' 
                 ? records 
@@ -744,8 +840,9 @@
             const recordsToShow = uniqueRecords.slice(0, 50);
             
             elements.recordsBody.innerHTML = recordsToShow.map(record => {
+                const isDefault = customRecords ? ' default-record' : '';
                 return `
-        <tr class="fade-in">
+        <tr class="fade-in${isDefault}">
             <td>${record.date || '未知日期'}</td>
             <td>${record.type || '未知类型'}</td>
             <td>${record.user || '未知用户'}</td>
@@ -760,9 +857,8 @@
             elements.loader.style.display = loading ? 'block' : 'none';
             
             // 显示或隐藏骨架屏
-            const skeletonContainer = document.getElementById('skeletonContainer');
-            if (skeletonContainer) {
-                skeletonContainer.style.display = loading ? 'block' : 'none';
+            if (elements.skeletonContainer) {
+                elements.skeletonContainer.style.display = loading ? 'block' : 'none';
             }
             
             // 只有在不是提交状态时才启用/禁用按钮
