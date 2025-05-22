@@ -75,15 +75,20 @@
             border-radius: 6px;
             cursor: pointer;
             font-size: 1rem;
-            transition: opacity 0.2s;
+            transition: background-color 0.2s, transform 0.1s;
             white-space: nowrap;
+            -webkit-tap-highlight-color: transparent;
         }
         button:hover {
-            opacity: 0.9;
+            opacity: 0.95;
+        }
+        button:active {
+            transform: scale(0.98);
         }
         button:disabled {
             background: #ccc;
             cursor: not-allowed;
+            transform: none;
         }
         .delete-btn {
             background: var(--error);
@@ -126,13 +131,25 @@
             text-align: center;
             margin: 10px 0;
             display: none;
+            padding: 8px;
+            border-radius: 4px;
+            background-color: rgba(255, 68, 68, 0.1);
         }
 
         .success-message {
-            color: var(--secondary);
+            color: white;
+            background-color: var(--secondary);
             text-align: center;
             margin: 10px 0;
             display: none;
+            padding: 8px;
+            border-radius: 4px;
+            animation: fadeIn 0.3s ease-in-out;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
         }
 
         footer {
@@ -161,22 +178,73 @@
             }
         }
         
-        /* 添加骨架屏样式 */
+        /* 优化表格区域 - 防止布局偏移 */
+        .table-container {
+            min-height: 250px;
+            position: relative;
+            overflow: hidden;
+            border-radius: 4px;
+            background: white;
+        }
+
+        .records-table {
+            width: 100%;
+            table-layout: fixed;
+            border-collapse: collapse;
+        }
+
+        .records-table th {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            height: 46px;
+        }
+
+        .records-table td {
+            height: 46px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* 改进骨架屏样式 */
         .skeleton-row {
-            height: 48px;
+            height: 46px;
             background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
             background-size: 200% 100%;
             animation: shimmer 1.5s infinite;
             border-bottom: 1px solid var(--border);
         }
-        
-        @keyframes shimmer {
-            0% {
-                background-position: -200% 0;
-            }
-            100% {
-                background-position: 200% 0;
-            }
+
+        .skeleton-container {
+            position: absolute;
+            top: 46px; /* 表头高度 */
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: white;
+            z-index: 5;
+        }
+
+        .empty-table-message {
+            text-align: center;
+            padding: 30px 0;
+            color: #888;
+            font-size: 0.95rem;
+            height: 100px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* 添加淡入淡出动画 */
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .fade-in {
+            animation: fadeIn 0.3s ease-in-out;
         }
     </style>
 </head>
@@ -228,24 +296,29 @@
 
     <div class="section">
         <div id="loader" class="loader"></div>
-        <table id="recordsTable">
-            <thead>
-                <tr>
-                    <th>浇水日期</th>
-                    <th>花卉种类</th>
-                    <th>记录人</th>
-                </tr>
-            </thead>
-            <tbody id="recordsBody">
+        <div class="table-container">
+            <table id="recordsTable" class="records-table">
+                <thead>
+                    <tr>
+                        <th>浇水日期</th>
+                        <th>花卉种类</th>
+                        <th>记录人</th>
+                    </tr>
+                </thead>
+                <tbody id="recordsBody">
+                    <!-- 实际记录将在这里显示 -->
+                </tbody>
+            </table>
+            <div id="skeletonContainer" class="skeleton-container">
                 <!-- 骨架屏将在这里显示 -->
-            </tbody>
-        </table>
+            </div>
+        </div>
     </div>
 
     <iframe name="submitFrame" id="submitFrame" class="hidden-iframe"></iframe>
 
     <footer>
-        <p>© <span id="currentYear"></span> 张东海. All Rights Reserved.</p>
+        <p>© <span id="currentYear"></span> 爱美特水务. All Rights Reserved.</p>
     </footer>
 
     <script>
@@ -262,7 +335,16 @@
             PENDING_STORAGE_KEY: 'pendingWateringRecords',
             SYNC_INTERVAL: 300000, // 5分钟同步一次
             CACHE_EXPIRY: 300000, // 缓存有效期5分钟
-            SUBMISSION_TIMEOUT: 30000 // 提交超时时间30秒
+            SUBMISSION_TIMEOUT: 30000, // 提交超时时间30秒
+            DEFAULT_RECORDS: [ // 默认记录，当没有数据时显示
+                {
+                    id: '1621234567890',
+                    date: '2025-05-21',
+                    type: '龙血树',
+                    user: '测试用户',
+                    timestamp: '2025-05-21T10:30:45.123Z'
+                }
+            ]
         };
 
         // DOM元素引用
@@ -295,7 +377,8 @@
             lastFetchTime: 0,
             syncTimer: null,
             initialized: false,
-            submissionTimer: null
+            submissionTimer: null,
+            hasLoadedData: false
         };
 
         // 初始化应用
@@ -323,27 +406,22 @@
             
             // 标记初始化完成
             state.initialized = true;
-            
-            // 检查FormSubmit配置
-            checkFormSubmitConfig();
-        }
-
-        // 检查FormSubmit配置
-        function checkFormSubmitConfig() {
-            const formAction = elements.recordForm.getAttribute('action');
-            if (formAction === 'https://formsubmit.co/bb9d91e48723fc8a13c1185902f67684') {
-                console.warn('FormSubmit配置未更新，请将表单action属性更新为您的FormSubmit端点');
-                showError('表单配置未完成，请联系管理员更新FormSubmit配置');
-            }
         }
 
         // 显示骨架屏加载效果
         function showSkeletonLoader() {
-            const skeletonHTML = Array(3).fill(0).map(() => 
-                `<tr><td colspan="3" class="skeleton-row"></td></tr>`
+            const skeletonHTML = Array(5).fill(0).map(() => 
+                `<div class="skeleton-row"></div>`
             ).join('');
             
-            elements.recordsBody.innerHTML = skeletonHTML;
+            const skeletonContainer = document.getElementById('skeletonContainer');
+            if (skeletonContainer) {
+                skeletonContainer.innerHTML = skeletonHTML;
+                skeletonContainer.style.display = 'block';
+            }
+            
+            // 确保表格体为空，避免重叠
+            elements.recordsBody.innerHTML = '';
         }
 
         // 设置事件监听器
@@ -357,6 +435,7 @@
                 
                 // 立即禁用按钮提供反馈
                 this.disabled = true;
+                this.textContent = '提交中...';
                 state.isSubmitting = true;
                 
                 // 异步处理提交
@@ -367,11 +446,13 @@
             elements.filterButton.addEventListener('click', function() {
                 // 立即禁用按钮提供反馈
                 this.disabled = true;
+                this.textContent = '筛选中...';
                 
                 // 异步处理筛选
                 requestAnimationFrame(() => {
                     renderRecords(elements.filterFlowerType.value);
                     this.disabled = false;
+                    this.textContent = '筛选记录';
                 });
             });
             
@@ -385,6 +466,7 @@
                     
                     // 立即禁用按钮提供反馈
                     elements.addButton.disabled = true;
+                    elements.addButton.textContent = '提交中...';
                     state.isSubmitting = true;
                     
                     // 异步处理提交
@@ -423,6 +505,7 @@
                     if (state.records.length > 0 && 
                         Date.now() - state.lastFetchTime < CONFIG.CACHE_EXPIRY) {
                         renderRecords();
+                        state.hasLoadedData = true;
                     }
                 }
                 
@@ -468,6 +551,7 @@
                         // 更新记录
                         state.records = data;
                         state.lastFetchTime = Date.now();
+                        state.hasLoadedData = true;
                         
                         // 保存到本地存储（带时间戳）
                         localStorage.setItem(CONFIG.LOCAL_STORAGE_KEY, JSON.stringify({
@@ -484,11 +568,21 @@
                 .catch(error => {
                     console.error('从服务器加载数据失败:', error);
                     
+                    // 隐藏骨架屏
+                    const skeletonContainer = document.getElementById('skeletonContainer');
+                    if (skeletonContainer) {
+                        skeletonContainer.style.display = 'none';
+                    }
+                    
                     // 如果有缓存数据，使用缓存数据
                     if (state.records.length > 0) {
                         renderRecords(elements.filterFlowerType.value);
+                    } else if (!state.hasLoadedData) {
+                        // 如果没有缓存数据且从未加载过数据，使用默认记录
+                        state.records = CONFIG.DEFAULT_RECORDS;
+                        renderRecords(elements.filterFlowerType.value);
                     } else {
-                        elements.recordsBody.innerHTML = '<tr><td colspan="3">加载数据失败，请稍后再试</td></tr>';
+                        elements.recordsBody.innerHTML = '<tr><td colspan="3"><div class="empty-table-message">加载数据失败，请稍后再试</div></td></tr>';
                     }
                 })
                 .finally(() => {
@@ -583,6 +677,7 @@
         function resetSubmitState() {
             state.isSubmitting = false;
             elements.addButton.disabled = false;
+            elements.addButton.textContent = '添加记录';
         }
 
         // 处理提交成功
@@ -611,6 +706,12 @@
 
         // 渲染记录表格 - 只显示已同步记录，不显示待审核记录
         function renderRecords(filter = 'all') {
+            // 隐藏骨架屏
+            const skeletonContainer = document.getElementById('skeletonContainer');
+            if (skeletonContainer) {
+                skeletonContainer.style.display = 'none';
+            }
+            
             // 只使用已同步记录
             const records = state.records;
             
@@ -619,7 +720,7 @@
                 : records.filter(item => item.type === filter);
             
             if (filteredRecords.length === 0) {
-                elements.recordsBody.innerHTML = '<tr><td colspan="3">没有找到记录</td></tr>';
+                elements.recordsBody.innerHTML = '<tr><td colspan="3"><div class="empty-table-message">没有找到记录</div></td></tr>';
                 return;
             }
             
@@ -639,14 +740,17 @@
                 }
             }
             
-            elements.recordsBody.innerHTML = uniqueRecords.map(record => {
+            // 限制显示的记录数量，避免过多记录导致性能问题
+            const recordsToShow = uniqueRecords.slice(0, 50);
+            
+            elements.recordsBody.innerHTML = recordsToShow.map(record => {
                 return `
-                <tr>
-                    <td>${record.date || '未知日期'}</td>
-                    <td>${record.type || '未知类型'}</td>
-                    <td>${record.user || '未知用户'}</td>
-                </tr>
-                `;
+        <tr class="fade-in">
+            <td>${record.date || '未知日期'}</td>
+            <td>${record.type || '未知类型'}</td>
+            <td>${record.user || '未知用户'}</td>
+        </tr>
+        `;
             }).join('');
         }
 
@@ -654,6 +758,12 @@
         function setLoading(loading) {
             state.isLoading = loading;
             elements.loader.style.display = loading ? 'block' : 'none';
+            
+            // 显示或隐藏骨架屏
+            const skeletonContainer = document.getElementById('skeletonContainer');
+            if (skeletonContainer) {
+                skeletonContainer.style.display = loading ? 'block' : 'none';
+            }
             
             // 只有在不是提交状态时才启用/禁用按钮
             if (!state.isSubmitting) {
