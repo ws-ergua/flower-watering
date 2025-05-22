@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit: cover">
     <title>爱美特水务花卉浇水记录</title>
     <style>
         :root {
@@ -160,6 +160,24 @@
                 width: 100%;
             }
         }
+        
+        /* 添加骨架屏样式 */
+        .skeleton-row {
+            height: 48px;
+            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        @keyframes shimmer {
+            0% {
+                background-position: -200% 0;
+            }
+            100% {
+                background-position: 200% 0;
+            }
+        }
     </style>
 </head>
 <body>
@@ -168,7 +186,7 @@
     </div>
     
     <div class="section">
-        <form id="recordForm" action="https://formsubmit.co/your-email@example.com" method="POST" target="submitFrame">
+        <form id="recordForm" action="https://formsubmit.co/bb9d91e48723fc8a13c1185902f67684" method="POST" target="submitFrame">
             <div class="input-row">
                 <input type="date" id="waterDate" name="waterDate">
                 <select id="flowerType" name="flowerType">
@@ -219,9 +237,7 @@
                 </tr>
             </thead>
             <tbody id="recordsBody">
-                <tr>
-                    <td colspan="3">正在加载数据...</td>
-                </tr>
+                <!-- 骨架屏将在这里显示 -->
             </tbody>
         </table>
     </div>
@@ -239,11 +255,14 @@
             REPO_NAME: 'flower-watering',
             DATA_FILE_PATH: 'data/records.json',
             get DATA_URL() {
+                // 添加缓存破坏参数
                 return `https://raw.githubusercontent.com/${this.GITHUB_USERNAME}/${this.REPO_NAME}/main/${this.DATA_FILE_PATH}?t=${Date.now()}`;
             },
             LOCAL_STORAGE_KEY: 'flowerWateringRecords',
             PENDING_STORAGE_KEY: 'pendingWateringRecords',
-            SYNC_INTERVAL: 60000 // 60秒同步一次
+            SYNC_INTERVAL: 300000, // 5分钟同步一次
+            CACHE_EXPIRY: 300000, // 缓存有效期5分钟
+            SUBMISSION_TIMEOUT: 30000 // 提交超时时间30秒
         };
 
         // DOM元素引用
@@ -272,7 +291,11 @@
             records: [],
             pendingRecords: [],
             isLoading: false,
-            syncTimer: null
+            isSubmitting: false,
+            lastFetchTime: 0,
+            syncTimer: null,
+            initialized: false,
+            submissionTimer: null
         };
 
         // 初始化应用
@@ -282,6 +305,9 @@
             
             // 设置默认日期为今天
             elements.waterDate.value = new Date().toISOString().split('T')[0];
+            
+            // 显示骨架屏
+            showSkeletonLoader();
             
             // 从本地存储加载数据
             loadFromLocalStorage();
@@ -294,36 +320,93 @@
             
             // 设置定时同步
             state.syncTimer = setInterval(loadFromGitHub, CONFIG.SYNC_INTERVAL);
+            
+            // 标记初始化完成
+            state.initialized = true;
+            
+            // 检查FormSubmit配置
+            checkFormSubmitConfig();
+        }
+
+        // 检查FormSubmit配置
+        function checkFormSubmitConfig() {
+            const formAction = elements.recordForm.getAttribute('action');
+            if (formAction === 'https://formsubmit.co/bb9d91e48723fc8a13c1185902f67684') {
+                console.warn('FormSubmit配置未更新，请将表单action属性更新为您的FormSubmit端点');
+                showError('表单配置未完成，请联系管理员更新FormSubmit配置');
+            }
+        }
+
+        // 显示骨架屏加载效果
+        function showSkeletonLoader() {
+            const skeletonHTML = Array(3).fill(0).map(() => 
+                `<tr><td colspan="3" class="skeleton-row"></td></tr>`
+            ).join('');
+            
+            elements.recordsBody.innerHTML = skeletonHTML;
         }
 
         // 设置事件监听器
         function setupEventListeners() {
             // 添加记录按钮
-            elements.addButton.onclick = function() {
-                handleAddRecord();
-            };
+            elements.addButton.addEventListener('click', function(e) {
+                e.preventDefault(); // 防止表单自动提交
+                
+                // 防止重复点击
+                if (state.isSubmitting) return;
+                
+                // 立即禁用按钮提供反馈
+                this.disabled = true;
+                state.isSubmitting = true;
+                
+                // 异步处理提交
+                requestAnimationFrame(handleAddRecord);
+            });
             
             // 筛选按钮
-            elements.filterButton.onclick = function() {
-                renderRecords(elements.filterFlowerType.value);
-            };
+            elements.filterButton.addEventListener('click', function() {
+                // 立即禁用按钮提供反馈
+                this.disabled = true;
+                
+                // 异步处理筛选
+                requestAnimationFrame(() => {
+                    renderRecords(elements.filterFlowerType.value);
+                    this.disabled = false;
+                });
+            });
             
             // 添加键盘支持 - 在输入框中按Enter键提交
-            elements.userName.onkeypress = function(e) {
+            elements.userName.addEventListener('keypress', function(e) {
                 if (e.key === 'Enter') {
-                    handleAddRecord();
+                    e.preventDefault(); // 防止表单自动提交
+                    
+                    // 防止重复提交
+                    if (state.isSubmitting) return;
+                    
+                    // 立即禁用按钮提供反馈
+                    elements.addButton.disabled = true;
+                    state.isSubmitting = true;
+                    
+                    // 异步处理提交
+                    requestAnimationFrame(handleAddRecord);
                 }
-            };
+            });
             
             // iframe加载完成事件
-            elements.submitFrame.onload = function() {
+            elements.submitFrame.addEventListener('load', function() {
                 // 检查是否是初始加载
                 if (this._hasLoaded) {
                     handleSubmitSuccess();
+                    
+                    // 清除提交超时计时器
+                    if (state.submissionTimer) {
+                        clearTimeout(state.submissionTimer);
+                        state.submissionTimer = null;
+                    }
                 } else {
                     this._hasLoaded = true;
                 }
-            };
+            });
         }
 
         // 从本地存储加载数据
@@ -332,28 +415,46 @@
                 // 加载已同步记录
                 const recordsData = localStorage.getItem(CONFIG.LOCAL_STORAGE_KEY);
                 if (recordsData) {
-                    state.records = JSON.parse(recordsData);
+                    const parsedData = JSON.parse(recordsData);
+                    state.records = parsedData.data || [];
+                    state.lastFetchTime = parsedData.timestamp || 0;
+                    
+                    // 如果有缓存数据且缓存未过期，立即渲染
+                    if (state.records.length > 0 && 
+                        Date.now() - state.lastFetchTime < CONFIG.CACHE_EXPIRY) {
+                        renderRecords();
+                    }
                 }
                 
-                // 加载待审核记录
+                // 加载待审核记录（仅用于后台处理，不显示）
                 const pendingData = localStorage.getItem(CONFIG.PENDING_STORAGE_KEY);
                 if (pendingData) {
                     state.pendingRecords = JSON.parse(pendingData);
                 }
-                
-                // 渲染记录
-                renderRecords();
             } catch (error) {
                 console.error('从本地存储加载数据失败:', error);
                 state.records = [];
                 state.pendingRecords = [];
-                renderRecords();
             }
         }
 
         // 从GitHub加载数据
         function loadFromGitHub() {
-            setLoading(true);
+            // 如果正在提交，延迟加载
+            if (state.isSubmitting) {
+                return;
+            }
+            
+            // 检查缓存是否有效
+            if (Date.now() - state.lastFetchTime < CONFIG.CACHE_EXPIRY && state.records.length > 0) {
+                // 缓存有效，不需要重新加载
+                return;
+            }
+            
+            // 只在初始化后显示加载器
+            if (state.initialized) {
+                setLoading(true);
+            }
             
             fetch(CONFIG.DATA_URL)
                 .then(response => {
@@ -363,23 +464,34 @@
                     return response.json();
                 })
                 .then(data => {
-                    console.log('从服务器加载的数据:', data);
-                    
                     if (Array.isArray(data)) {
                         // 更新记录
                         state.records = data;
+                        state.lastFetchTime = Date.now();
                         
-                        // 保存到本地存储
-                        localStorage.setItem(CONFIG.LOCAL_STORAGE_KEY, JSON.stringify(state.records));
+                        // 保存到本地存储（带时间戳）
+                        localStorage.setItem(CONFIG.LOCAL_STORAGE_KEY, JSON.stringify({
+                            data: state.records,
+                            timestamp: state.lastFetchTime
+                        }));
                         
                         // 重新渲染
-                        renderRecords();
+                        renderRecords(elements.filterFlowerType.value);
                     } else {
                         throw new Error('服务器返回的数据格式不正确');
                     }
                 })
                 .catch(error => {
                     console.error('从服务器加载数据失败:', error);
+                    
+                    // 如果有缓存数据，使用缓存数据
+                    if (state.records.length > 0) {
+                        renderRecords(elements.filterFlowerType.value);
+                        showError('数据更新失败，显示的是缓存数据');
+                    } else {
+                        elements.recordsBody.innerHTML = '<tr><td colspan="3">加载数据失败，请稍后再试</td></tr>';
+                        showError('加载数据失败，请检查网络连接');
+                    }
                 })
                 .finally(() => {
                     setLoading(false);
@@ -395,16 +507,19 @@
 
             if (!date) {
                 showError('请选择浇水日期');
+                resetSubmitState();
                 return;
             }
 
             if (!type) {
                 showError('请选择花卉种类');
+                resetSubmitState();
                 return;
             }
 
             if (!user) {
                 showError('请输入记录人姓名');
+                resetSubmitState();
                 return;
             }
 
@@ -433,22 +548,49 @@
             
             elements.recordData.value = recordData;
             
-            // 添加到待审核记录
+            // 添加到待审核记录（仅用于后台处理，不显示）
             state.pendingRecords.push(newRecord);
             savePendingRecords();
             
-            // 显示加载状态
-            setLoading(true);
+            // 设置提交超时处理
+            state.submissionTimer = setTimeout(() => {
+                // 如果超时未收到iframe的加载完成事件，认为提交失败
+                if (state.isSubmitting) {
+                    showError('提交超时，请检查网络连接后重试');
+                    resetSubmitState();
+                    
+                    // 记录提交失败
+                    console.error('表单提交超时');
+                }
+            }, CONFIG.SUBMISSION_TIMEOUT);
             
             // 提交表单
-            elements.recordForm.submit();
-            
-            // 重新渲染
-            renderRecords();
+            try {
+                elements.recordForm.submit();
+                console.log('表单已提交');
+            } catch (error) {
+                console.error('表单提交失败:', error);
+                showError('提交失败，请稍后重试');
+                resetSubmitState();
+                
+                // 清除提交超时计时器
+                if (state.submissionTimer) {
+                    clearTimeout(state.submissionTimer);
+                    state.submissionTimer = null;
+                }
+            }
+        }
+
+        // 重置提交状态
+        function resetSubmitState() {
+            state.isSubmitting = false;
+            elements.addButton.disabled = false;
         }
 
         // 处理提交成功
         function handleSubmitSuccess() {
+            console.log('表单提交成功');
+            
             // 重置表单
             elements.flowerType.value = '';
             elements.userName.value = '';
@@ -456,8 +598,13 @@
             // 显示成功消息
             showSuccess('记录已提交，等待管理员审核');
             
-            // 取消加载状态
-            setLoading(false);
+            // 重置提交状态
+            resetSubmitState();
+            
+            // 5秒后自动刷新数据
+            setTimeout(() => {
+                loadFromGitHub();
+            }, 5000);
         }
 
         // 保存待审核记录到本地存储
@@ -469,14 +616,14 @@
             }
         }
 
-        // 渲染记录表格
+        // 渲染记录表格 - 只显示已同步记录，不显示待审核记录
         function renderRecords(filter = 'all') {
-            // 合并已同步记录和待审核记录
-            const allRecords = [...state.records, ...state.pendingRecords];
+            // 只使用已同步记录
+            const records = state.records;
             
             const filteredRecords = filter === 'all' 
-                ? allRecords 
-                : allRecords.filter(item => item.type === filter);
+                ? records 
+                : records.filter(item => item.type === filter);
             
             if (filteredRecords.length === 0) {
                 elements.recordsBody.innerHTML = '<tr><td colspan="3">没有找到记录</td></tr>';
@@ -485,7 +632,7 @@
             
             // 按日期排序（最新的在前）
             filteredRecords.sort((a, b) => {
-                return new Date(b.timestamp) - new Date(a.timestamp);
+                return new Date(b.timestamp || b.date) - new Date(a.timestamp || a.date);
             });
             
             // 去重（以ID为标准）
@@ -500,14 +647,10 @@
             }
             
             elements.recordsBody.innerHTML = uniqueRecords.map(record => {
-                // 检查是否为待审核记录
-                const isPending = state.pendingRecords.some(item => item.id === record.id);
-                const pendingBadge = isPending ? '<span class="pending-badge">待审核</span>' : '';
-                
                 return `
                 <tr>
                     <td>${record.date || '未知日期'}</td>
-                    <td>${record.type || '未知类型'} ${pendingBadge}</td>
+                    <td>${record.type || '未知类型'}</td>
                     <td>${record.user || '未知用户'}</td>
                 </tr>
                 `;
@@ -518,7 +661,11 @@
         function setLoading(loading) {
             state.isLoading = loading;
             elements.loader.style.display = loading ? 'block' : 'none';
-            elements.addButton.disabled = loading;
+            
+            // 只有在不是提交状态时才启用/禁用按钮
+            if (!state.isSubmitting) {
+                elements.addButton.disabled = loading;
+            }
             elements.filterButton.disabled = loading;
         }
 
