@@ -299,22 +299,6 @@
         .submit-button:active::after {
             animation: ripple 0.6s ease-out;
         }
-        
-        /* 添加管理员工具按钮 */
-        .admin-button {
-            background-color: #555;
-            margin-left: auto;
-            font-size: 0.9rem;
-            padding: 8px 12px;
-        }
-        
-        .admin-panel {
-            display: none;
-            margin-top: 10px;
-            padding: 10px;
-            background-color: #f5f5f5;
-            border-radius: 4px;
-        }
     </style>
 </head>
 <body>
@@ -360,12 +344,6 @@
                 <option value="马拉巴栗">马拉巴栗</option>
             </select>
             <button id="filterButton" type="button">筛选记录</button>
-            <button id="refreshButton" type="button" class="admin-button">刷新数据</button>
-        </div>
-        <div id="adminPanel" class="admin-panel">
-            <div class="input-row">
-                <button id="triggerWorkflowButton" type="button">手动触发同步</button>
-            </div>
         </div>
     </div>
 
@@ -412,9 +390,6 @@
                 addButton: document.getElementById('addButton'),
                 filterFlowerType: document.getElementById('filterFlowerType'),
                 filterButton: document.getElementById('filterButton'),
-                refreshButton: document.getElementById('refreshButton'),
-                triggerWorkflowButton: document.getElementById('triggerWorkflowButton'),
-                adminPanel: document.getElementById('adminPanel'),
                 submitFrame: document.getElementById('submitFrame'),
                 loader: document.getElementById('loader'),
                 errorMessage: document.getElementById('errorMessage'),
@@ -435,8 +410,8 @@
                 },
                 LOCAL_STORAGE_KEY: 'flowerWateringRecords',
                 PENDING_STORAGE_KEY: 'pendingWateringRecords',
-                SYNC_INTERVAL: 60000, // 1分钟同步一次
-                CACHE_EXPIRY: 60000, // 缓存有效期1分钟
+                SYNC_INTERVAL: 30000, // 30秒同步一次
+                CACHE_EXPIRY: 30000, // 缓存有效期30秒
                 SUBMISSION_TIMEOUT: 30000 // 提交超时时间30秒
             };
 
@@ -478,21 +453,6 @@
                 
                 // 标记初始化完成
                 state.initialized = true;
-                
-                // 检查是否为管理员模式
-                checkAdminMode();
-            }
-            
-            // 检查是否为管理员模式
-            function checkAdminMode() {
-                // 检查URL参数是否包含admin=true
-                const urlParams = new URLSearchParams(window.location.search);
-                const isAdmin = urlParams.get('admin') === 'true';
-                
-                if (isAdmin) {
-                    // 显示管理员面板
-                    elements.adminPanel.style.display = 'block';
-                }
             }
 
             // 显示骨架屏加载效果
@@ -517,14 +477,6 @@
                 
                 // 筛选按钮 - 极速响应
                 elements.filterButton.addEventListener('click', handleFilterClick);
-                
-                // 刷新数据按钮
-                elements.refreshButton.addEventListener('click', handleRefreshClick);
-                
-                // 手动触发工作流按钮
-                if (elements.triggerWorkflowButton) {
-                    elements.triggerWorkflowButton.addEventListener('click', handleTriggerWorkflow);
-                }
                 
                 // 添加键盘支持 - 在输入框中按Enter键提交
                 elements.userName.addEventListener('keypress', function(e) {
@@ -586,68 +538,6 @@
                 // 立即恢复按钮状态
                 elements.filterButton.disabled = false;
                 elements.filterButton.textContent = '筛选记录';
-            }
-            
-            // 处理刷新数据按钮点击
-            function handleRefreshClick() {
-                // 立即更新按钮状态
-                elements.refreshButton.disabled = true;
-                
-                // 强制刷新数据
-                state.lastFetchTime = 0;
-                loadFromGitHub(true);
-                
-                // 3秒后恢复按钮状态
-                setTimeout(() => {
-                    elements.refreshButton.disabled = false;
-                }, 3000);
-            }
-            
-            // 处理手动触发工作流
-            function handleTriggerWorkflow() {
-                // 立即更新按钮状态
-                elements.triggerWorkflowButton.disabled = true;
-                elements.triggerWorkflowButton.textContent = '触发中...';
-                
-                // 显示加载中
-                setLoading(true);
-                
-                // 构建请求URL
-                const workflowDispatchUrl = `https://api.github.com/repos/${CONFIG.GITHUB_USERNAME}/${CONFIG.REPO_NAME}/actions/workflows/process-issues.yml/dispatches`;
-                
-                // 发送请求
-                fetch(workflowDispatchUrl, {
-                    method: 'POST',
-                    headers: {
-                        'Accept': 'application/vnd.github.v3+json',
-                        'Authorization': `token ${prompt('请输入您的GitHub个人访问令牌')}`
-                    },
-                    body: JSON.stringify({
-                        ref: 'main'
-                    })
-                })
-                .then(response => {
-                    if (response.ok) {
-                        showSuccess('工作流已触发，请等待数据同步');
-                        
-                        // 30秒后刷新数据
-                        setTimeout(() => {
-                            loadFromGitHub(true);
-                        }, 30000);
-                    } else {
-                        throw new Error(`触发工作流失败: ${response.status}`);
-                    }
-                })
-                .catch(error => {
-                    console.error('触发工作流失败:', error);
-                    showError('触发工作流失败，请检查令牌权限');
-                })
-                .finally(() => {
-                    // 恢复按钮状态
-                    elements.triggerWorkflowButton.disabled = false;
-                    elements.triggerWorkflowButton.textContent = '手动触发同步';
-                    setLoading(false);
-                });
             }
             
             // 验证表单
@@ -775,14 +665,14 @@
             }
 
             // 从GitHub加载数据
-            function loadFromGitHub(forceRefresh = false) {
+            function loadFromGitHub() {
                 // 如果正在提交，延迟加载
                 if (state.isSubmitting) {
                     return;
                 }
                 
                 // 检查缓存是否有效
-                if (!forceRefresh && Date.now() - state.lastFetchTime < CONFIG.CACHE_EXPIRY && state.records.length > 0) {
+                if (Date.now() - state.lastFetchTime < CONFIG.CACHE_EXPIRY && state.records.length > 0) {
                     // 缓存有效，不需要重新加载
                     return;
                 }
@@ -796,7 +686,11 @@
                 const dataUrl = `https://raw.githubusercontent.com/${CONFIG.GITHUB_USERNAME}/${CONFIG.REPO_NAME}/main/${CONFIG.DATA_FILE_PATH}?t=${Date.now()}`;
                 
                 fetch(dataUrl, {
-                    cache: 'no-store' // 禁用缓存
+                    cache: 'no-store', // 禁用缓存
+                    headers: {
+                        'Pragma': 'no-cache',
+                        'Cache-Control': 'no-cache'
+                    }
                 })
                     .then(response => {
                         if (!response.ok) {
@@ -841,7 +735,7 @@
                     .finally(() => {
                         setLoading(false);
                     });
-}
+            }
 
             // 重置提交状态
             function resetSubmitState() {
@@ -856,6 +750,11 @@
                 
                 // 重置提交状态
                 resetSubmitState();
+                
+                // 立即刷新数据
+                setTimeout(() => {
+                    loadFromGitHub();
+                }, 1000);
             }
 
             // 保存待审核记录到本地存储
@@ -987,6 +886,19 @@
             
             // 立即执行预加载
             preloadResources();
+            
+            // 添加页面可见性变化监听，当页面重新变为可见时刷新数据
+            document.addEventListener('visibilitychange', function() {
+                if (document.visibilityState === 'visible') {
+                    // 页面变为可见时，立即刷新数据
+                    loadFromGitHub();
+                }
+            });
+            
+            // 添加页面焦点变化监听，当页面重新获得焦点时刷新数据
+            window.addEventListener('focus', function() {
+                loadFromGitHub();
+            });
         })();
     </script>
 </body>
