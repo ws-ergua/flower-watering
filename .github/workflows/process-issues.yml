@@ -4,6 +4,11 @@ on:
   issues:
     types: [opened, edited, labeled]
   workflow_dispatch:
+    inputs:
+      force:
+        description: 'Force update records'
+        required: false
+        default: 'false'
 
 jobs:
   process-records:
@@ -15,6 +20,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
       
       - name: Setup Node.js
         uses: actions/setup-node@v3
@@ -24,7 +31,7 @@ jobs:
       - name: Create data directory
         run: mkdir -p data
       
-      - name: Create simple records processor
+      - name: Create records processor
         run: |
           cat > process-records.js << 'EOF'
           const fs = require('fs');
@@ -34,12 +41,13 @@ jobs:
           const repo = process.env.GITHUB_REPOSITORY;
           const token = process.env.GITHUB_TOKEN;
           const outputFile = 'data/records.json';
+          const requiredLabel = 'watering-record';
           
           console.log('Starting records processing...');
           console.log(`Repository: ${repo}`);
           
           // 简单的API请求函数
-          function makeRequest(options) {
+          function makeRequest(options, postData = null) {
             return new Promise((resolve, reject) => {
               const req = https.request(options, (res) => {
                 let data = '';
@@ -68,44 +76,61 @@ jobs:
                 reject(e);
               });
               
+              if (postData) {
+                req.write(postData);
+              }
+              
               req.end();
             });
           }
           
-          // 获取带有特定标签的Issues
-          async function getWateringRecordIssues() {
-            console.log('Fetching issues...');
+          // 获取所有带标签的Issues（包括分页）
+          async function getAllWateringRecordIssues() {
+            console.log('Fetching all watering record issues...');
+            let allIssues = [];
+            let page = 1;
+            let hasMore = true;
             
-            const options = {
-              hostname: 'api.github.com',
-              path: `/repos/${repo}/issues?state=open&labels=watering-record&per_page=100`,
-              method: 'GET',
-              headers: {
-                'User-Agent': 'GitHub-Action-Script',
-                'Accept': 'application/vnd.github.v3+json',
-                'Authorization': `token ${token}`
+            while (hasMore) {
+              const options = {
+                hostname: 'api.github.com',
+                path: `/repos/${repo}/issues?state=all&labels=${requiredLabel}&page=${page}&per_page=100`,
+                method: 'GET',
+                headers: {
+                  'User-Agent': 'GitHub-Action-Script',
+                  'Accept': 'application/vnd.github.v3+json',
+                  'Authorization': `token ${token}`
+                }
+              };
+              
+              try {
+                const issues = await makeRequest(options);
+                if (issues.length === 0) {
+                  hasMore = false;
+                } else {
+                  allIssues = allIssues.concat(issues);
+                  page++;
+                }
+              } catch (error) {
+                console.error('Error fetching issues:', error);
+                hasMore = false;
               }
-            };
-            
-            try {
-              const issues = await makeRequest(options);
-              console.log(`Found ${issues.length} watering record issues`);
-              return issues;
-            } catch (error) {
-              console.error('Error fetching issues:', error);
-              return [];
             }
+            
+            console.log(`Found ${allIssues.length} watering record issues`);
+            return allIssues;
           }
           
           // 从Issue内容中提取记录数据
           function extractRecordFromIssue(issue) {
             const record = {
-              id: Date.now().toString() + '-' + issue.number,
+              id: issue.number.toString(),
               issue_number: issue.number,
               issue_title: issue.title,
               issue_url: issue.html_url,
               created_at: issue.created_at,
-              updated_at: issue.updated_at
+              updated_at: issue.updated_at,
+              state: issue.state
             };
             
             // 尝试从Issue内容中提取数据
@@ -142,8 +167,8 @@ jobs:
           // 主函数
           async function main() {
             try {
-              // 获取Issues
-              const issues = await getWateringRecordIssues();
+              // 获取所有带标签的Issues
+              const issues = await getAllWateringRecordIssues();
               
               if (issues.length === 0) {
                 console.log('No watering record issues found. Creating empty records file.');
@@ -155,7 +180,7 @@ jobs:
               const records = issues.map(issue => {
                 console.log(`Processing issue #${issue.number}: ${issue.title}`);
                 return extractRecordFromIssue(issue);
-              });
+              }).filter(record => record.type); // 只保留有花卉类型的记录
               
               // 按时间排序（最新的在前）
               records.sort((a, b) => {
@@ -167,6 +192,16 @@ jobs:
               // 写入文件
               console.log(`Writing ${records.length} records to ${outputFile}`);
               fs.writeFileSync(outputFile, JSON.stringify(records, null, 2));
+              
+              // 提交更改
+              console.log('Committing changes...');
+              const commitMessage = `Update records from issues (${new Date().toISOString()})`;
+              await exec('git config --global user.name "GitHub Actions"');
+              await exec('git config --global user.email "actions@github.com"');
+              await exec('git add data/records.json');
+              await exec(`git commit -m "${commitMessage}"`);
+              await exec('git push');
+              
               console.log('Records processing completed successfully');
             } catch (error) {
               console.error('Error processing records:', error);
@@ -178,12 +213,28 @@ jobs:
           
           // 执行主函数
           main();
+          
+          // 辅助函数：执行shell命令
+          function exec(command) {
+            return new Promise((resolve, reject) => {
+              require('child_process').exec(command, (error, stdout, stderr) => {
+                if (error) {
+                  console.error(`exec error: ${error}`);
+                  reject(error);
+                } else {
+                  console.log(stdout);
+                  resolve(stdout);
+                }
+              });
+            });
+          }
           EOF
           
           echo "Running records processor..."
           node process-records.js
       
       - name: Commit and push changes
+        if: always()
         run: |
           git config --global user.name 'GitHub Actions'
           git config --global user.email 'actions@github.com'
