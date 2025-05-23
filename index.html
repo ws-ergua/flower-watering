@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit: cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>爱美特水务花卉浇水记录</title>
     <style>
         :root {
@@ -29,6 +29,8 @@
             margin: 0 auto;
             padding: 15px;
             min-height: 100vh;
+            opacity: 1;
+            transition: opacity 0.3s ease-in-out;
         }
 
         .header {
@@ -156,23 +158,6 @@
                 width: 100%;
             }
         }
-        
-        .skeleton-row {
-            height: 48px;
-            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
-            background-size: 200% 100%;
-            animation: shimmer 1.5s infinite;
-            border-bottom: 1px solid var(--border);
-        }
-        
-        @keyframes shimmer {
-            0% {
-                background-position: -200% 0;
-            }
-            100% {
-                background-position: 200% 0;
-            }
-        }
     </style>
 </head>
 <body>
@@ -195,7 +180,6 @@
                 <button id="addButton" type="submit">添加记录</button>
             </div>
             
-            <!-- FormSubmit配置 -->
             <input type="hidden" name="_subject" value="新浇水记录">
             <input type="hidden" name="_template" value="table">
             <input type="hidden" name="_captcha" value="false">
@@ -250,7 +234,7 @@
                 return `https://raw.githubusercontent.com/${this.GITHUB_USERNAME}/${this.REPO_NAME}/main/${this.DATA_FILE_PATH}?t=${Date.now()}`;
             },
             SYNC_INTERVAL: 300000, // 5分钟同步一次
-            CACHE_EXPIRY: 60000, // 缓存有效期1分钟
+            CACHE_EXPIRY: 60000,   // 缓存有效期1分钟
             SUBMISSION_TIMEOUT: 10000 // 提交超时时间10秒
         };
 
@@ -290,8 +274,8 @@
             // 设置默认日期为今天
             elements.waterDate.value = new Date().toISOString().split('T')[0];
             
-            // 显示骨架屏
-            showSkeletonLoader();
+            // 初始隐藏页面内容
+            document.body.style.opacity = '0';
             
             // 加载数据
             loadFromGitHub();
@@ -301,11 +285,11 @@
             
             // 设置定时同步
             state.syncTimer = setInterval(loadFromGitHub, CONFIG.SYNC_INTERVAL);
-        }
-
-        // 显示骨架屏加载效果
-        function showSkeletonLoader() {
-            elements.recordsBody.innerHTML = Array(3).fill('<tr><td colspan="3" class="skeleton-row"></td></tr>').join('');
+            
+            // 淡入页面
+            setTimeout(() => {
+                document.body.style.opacity = '1';
+            }, 100);
         }
 
         // 设置事件监听器
