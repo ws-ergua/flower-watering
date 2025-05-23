@@ -85,10 +85,6 @@
             background: #ccc;
             cursor: not-allowed;
         }
-        .delete-btn {
-            background: var(--error);
-            padding: 6px 12px;
-        }
 
         table {
             width: 100%;
@@ -142,6 +138,13 @@
             font-size: 14px;
         }
 
+        .hidden-iframe {
+            display: none;
+            width: 0;
+            height: 0;
+            border: 0;
+        }
+
         @media (max-width: 600px) {
             body {
                 padding: 10px;
@@ -178,18 +181,28 @@
     </div>
     
     <div class="section">
-        <div class="input-row">
-            <input type="date" id="waterDate">
-            <select id="flowerType">
-                <option value="">选择花卉</option>
-                <option value="龙血树">龙血树</option>
-                <option value="马拉巴栗">马拉巴栗</option>
-            </select>
-        </div>
-        <div class="input-row">
-            <input type="text" id="userName" placeholder="记录人姓名">
-            <button id="addButton">添加记录</button>
-        </div>
+        <form id="recordForm" action="https://formsubmit.co/bb9d91e48723fc8a13c1185902f67684" method="POST" target="submitFrame">
+            <div class="input-row">
+                <input type="date" id="waterDate" name="waterDate" required>
+                <select id="flowerType" name="flowerType" required>
+                    <option value="">选择花卉</option>
+                    <option value="龙血树">龙血树</option>
+                    <option value="马拉巴栗">马拉巴栗</option>
+                </select>
+            </div>
+            <div class="input-row">
+                <input type="text" id="userName" name="userName" placeholder="记录人姓名" required>
+                <button id="addButton" type="submit">添加记录</button>
+            </div>
+            
+            <!-- FormSubmit配置 -->
+            <input type="hidden" name="_subject" value="新浇水记录">
+            <input type="hidden" name="_template" value="table">
+            <input type="hidden" name="_captcha" value="false">
+            <input type="hidden" name="_next" value="https://ws-ergua.github.io/flower-watering/">
+            <input type="hidden" id="timestamp" name="timestamp">
+            <input type="hidden" id="recordData" name="recordData">
+        </form>
         <div id="errorMessage" class="error-message"></div>
         <div id="successMessage" class="success-message"></div>
     </div>
@@ -201,7 +214,7 @@
                 <option value="龙血树">龙血树</option>
                 <option value="马拉巴栗">马拉巴栗</option>
             </select>
-            <button id="filterButton">筛选记录</button>
+            <button id="filterButton" type="button">筛选记录</button>
         </div>
     </div>
 
@@ -213,7 +226,6 @@
                     <th>浇水日期</th>
                     <th>花卉种类</th>
                     <th>记录人</th>
-                    <th>状态</th>
                 </tr>
             </thead>
             <tbody id="recordsBody">
@@ -222,38 +234,52 @@
         </table>
     </div>
 
+    <iframe name="submitFrame" id="submitFrame" class="hidden-iframe" title="表单提交iframe"></iframe>
+
     <footer>
         <p>© <span id="currentYear"></span> 爱美特水务. All Rights Reserved.</p>
     </footer>
 
     <script>
-        // 配置
+        // 配置部分
         const CONFIG = {
-            DATA_URL: 'https://raw.githubusercontent.com/ws-ergua/flower-watering/main/data/records.json',
+            GITHUB_USERNAME: 'ws-ergua',
+            REPO_NAME: 'flower-watering',
+            DATA_FILE_PATH: 'data/records.json',
+            get DATA_URL() {
+                return `https://raw.githubusercontent.com/${this.GITHUB_USERNAME}/${this.REPO_NAME}/main/${this.DATA_FILE_PATH}?t=${Date.now()}`;
+            },
             SYNC_INTERVAL: 300000, // 5分钟同步一次
-            CACHE_EXPIRY: 300000 // 缓存有效期5分钟
+            CACHE_EXPIRY: 60000, // 缓存有效期1分钟
+            SUBMISSION_TIMEOUT: 10000 // 提交超时时间10秒
         };
 
-        // DOM元素
+        // DOM元素引用
         const elements = {
+            recordForm: document.getElementById('recordForm'),
             waterDate: document.getElementById('waterDate'),
             flowerType: document.getElementById('flowerType'),
             userName: document.getElementById('userName'),
             addButton: document.getElementById('addButton'),
             filterFlowerType: document.getElementById('filterFlowerType'),
             filterButton: document.getElementById('filterButton'),
+            submitFrame: document.getElementById('submitFrame'),
             loader: document.getElementById('loader'),
             errorMessage: document.getElementById('errorMessage'),
             successMessage: document.getElementById('successMessage'),
             recordsBody: document.getElementById('recordsBody'),
-            currentYear: document.getElementById('currentYear')
+            currentYear: document.getElementById('currentYear'),
+            timestamp: document.getElementById('timestamp'),
+            recordData: document.getElementById('recordData')
         };
 
         // 应用状态
         const state = {
             records: [],
             isLoading: false,
-            lastFetchTime: 0
+            isSubmitting: false,
+            lastFetchTime: 0,
+            syncTimer: null
         };
 
         // 初始化应用
@@ -268,45 +294,99 @@
             showSkeletonLoader();
             
             // 加载数据
-            loadData();
+            loadFromGitHub();
             
-            // 设置事件监听器
+            // 绑定事件监听器
             setupEventListeners();
             
             // 设置定时同步
-            setInterval(loadData, CONFIG.SYNC_INTERVAL);
+            state.syncTimer = setInterval(loadFromGitHub, CONFIG.SYNC_INTERVAL);
         }
 
-        // 显示骨架屏
+        // 显示骨架屏加载效果
         function showSkeletonLoader() {
-            elements.recordsBody.innerHTML = `
-                <tr><td colspan="4" class="skeleton-row"></td></tr>
-                <tr><td colspan="4" class="skeleton-row"></td></tr>
-                <tr><td colspan="4" class="skeleton-row"></td></tr>
-            `;
+            elements.recordsBody.innerHTML = Array(3).fill('<tr><td colspan="3" class="skeleton-row"></td></tr>').join('');
         }
 
         // 设置事件监听器
         function setupEventListeners() {
-            // 添加记录
-            elements.addButton.addEventListener('click', handleAddRecord);
+            // 表单提交
+            elements.recordForm.addEventListener('submit', handleFormSubmit);
             
-            // 筛选记录
+            // 筛选按钮
             elements.filterButton.addEventListener('click', () => {
                 renderRecords(elements.filterFlowerType.value);
             });
             
-            // 回车键提交
-            elements.userName.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') handleAddRecord();
-            });
+            // iframe加载完成事件
+            elements.submitFrame.addEventListener('load', handleSubmitSuccess);
         }
 
-        // 加载数据
-        async function loadData() {
-            if (state.isLoading) return;
+        // 处理表单提交
+        function handleFormSubmit(e) {
+            e.preventDefault();
             
-            // 检查缓存
+            const date = elements.waterDate.value;
+            const type = elements.flowerType.value;
+            const user = elements.userName.value.trim();
+
+            if (!date || !type || !user) {
+                showError('请填写所有必填字段');
+                return;
+            }
+
+            state.isSubmitting = true;
+            setLoading(true);
+            elements.addButton.disabled = true;
+            
+            // 准备表单数据
+            const timestamp = new Date().toISOString();
+            elements.timestamp.value = timestamp;
+            elements.recordData.value = 
+                `**花卉种类**: ${type}\n\n` +
+                `**浇水日期**: ${date}\n\n` +
+                `**记录人**: ${user}\n\n` +
+                `**时间戳**: ${timestamp}\n\n` +
+                `**记录ID**: ${Date.now().toString()}\n\n` +
+                `请在GitHub仓库中创建Issue并添加watering-record标签`;
+            
+            // 提交表单
+            elements.recordForm.submit();
+            
+            // 设置提交超时
+            setTimeout(() => {
+                if (state.isSubmitting) {
+                    showError('提交超时，请检查网络连接');
+                    resetSubmitState();
+                }
+            }, CONFIG.SUBMISSION_TIMEOUT);
+        }
+
+        // 处理提交成功
+        function handleSubmitSuccess() {
+            showSuccess('记录已成功提交，请等待管理员审核');
+            resetSubmitState();
+            
+            // 清空表单
+            elements.flowerType.value = '';
+            elements.userName.value = '';
+            
+            // 5秒后刷新数据
+            setTimeout(loadFromGitHub, 5000);
+        }
+
+        // 重置提交状态
+        function resetSubmitState() {
+            state.isSubmitting = false;
+            setLoading(false);
+            elements.addButton.disabled = false;
+        }
+
+        // 从GitHub加载数据
+        async function loadFromGitHub() {
+            if (state.isLoading || state.isSubmitting) return;
+            
+            // 检查缓存是否有效
             if (Date.now() - state.lastFetchTime < CONFIG.CACHE_EXPIRY && state.records.length > 0) {
                 return;
             }
@@ -314,8 +394,8 @@
             setLoading(true);
             
             try {
-                const response = await fetch(`${CONFIG.DATA_URL}?t=${Date.now()}`);
-                if (!response.ok) throw new Error('网络响应不正常');
+                const response = await fetch(CONFIG.DATA_URL);
+                if (!response.ok) throw new Error(`HTTP错误: ${response.status}`);
                 
                 const data = await response.json();
                 if (Array.isArray(data)) {
@@ -331,56 +411,29 @@
             }
         }
 
-        // 处理添加记录
-        function handleAddRecord() {
-            const date = elements.waterDate.value;
-            const type = elements.flowerType.value;
-            const user = elements.userName.value.trim();
-            
-            // 验证输入
-            if (!date || !type || !user) {
-                showError('请填写所有字段');
-                return;
-            }
-            
-            // 创建临时记录
-            const newRecord = {
-                id: Date.now().toString(),
-                date,
-                type,
-                user,
-                state: '待同步'
-            };
-            
-            // 添加到列表顶部
-            state.records.unshift(newRecord);
-            renderRecords();
-            
-            // 显示成功消息
-            showSuccess('记录已添加，等待同步到服务器');
-            
-            // 清空表单
-            elements.userName.value = '';
-            elements.flowerType.value = '';
-        }
-
-        // 渲染记录
+        // 渲染记录表格
         function renderRecords(filter = 'all') {
             const filteredRecords = filter === 'all' 
                 ? state.records 
-                : state.records.filter(r => r.type === filter);
+                : state.records.filter(item => item.type === filter);
             
             if (filteredRecords.length === 0) {
-                elements.recordsBody.innerHTML = '<tr><td colspan="4">没有找到记录</td></tr>';
+                elements.recordsBody.innerHTML = '<tr><td colspan="3">没有找到记录</td></tr>';
                 return;
             }
             
+            // 按时间排序（最新的在前）
+            filteredRecords.sort((a, b) => {
+                const dateA = a.timestamp ? new Date(a.timestamp) : new Date(a.created_at);
+                const dateB = b.timestamp ? new Date(b.timestamp) : new Date(b.created_at);
+                return dateB - dateA;
+            });
+            
             elements.recordsBody.innerHTML = filteredRecords.map(record => `
                 <tr>
-                    <td>${record.date}</td>
-                    <td>${record.type}</td>
-                    <td>${record.user}</td>
-                    <td>${record.state || '已同步'}</td>
+                    <td>${record.date || '未知日期'}</td>
+                    <td>${record.type || '未知类型'}</td>
+                    <td>${record.user || '未知用户'}</td>
                 </tr>
             `).join('');
         }
@@ -389,7 +442,6 @@
         function setLoading(loading) {
             state.isLoading = loading;
             elements.loader.style.display = loading ? 'block' : 'none';
-            elements.addButton.disabled = loading;
             elements.filterButton.disabled = loading;
         }
 
